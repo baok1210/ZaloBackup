@@ -1,0 +1,33 @@
+# User data — DO NOT commit. Your conversations and downloaded media live here.
+exports/
+messages_*.json
+raw_batches/
+media_*.zip
+
+# Built EXE — users build their own from source.
+ZaloBackup.exe
+dist/
+build/
+*.spec
+
+# Logs from the WebUI / detached server runs.
+*.log
+*.log.err
+
+# Python bytecode + cache.
+__pycache__/
+*.pyc
+*.pyo
+
+# editor / OS cruft
+.idea/
+.vscode/
+.vs/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Freebuff workspace (thread-scoped, not part of the open-source repo).
+.freebuff/

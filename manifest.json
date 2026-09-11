@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Zalo Message Backup",
+  "version": "5.0",
+  "description": "Backup tin nhan Zalo ve may",
+  "permissions": ["activeTab", "storage", "alarms"],
+  "host_permissions": ["https://*.chat.zalo.me/*", "https://*.zalo.me/*", "https://zalo.me/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Zalo Backup - Click on page"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://chat.zalo.me/*"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["pagescript.js"],
+      "matches": ["https://chat.zalo.me/*"]
+    }
+  ]
+}
