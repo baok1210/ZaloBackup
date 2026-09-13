@@ -195,13 +195,13 @@ H:\zalo-backup\
 ├── zalo_merge.py             # merge/dedupe engine (snapshot→master, media master)
 ├── ZALO_DECRYPTION_KNOWLEDGE.md  # how the store/CDP/crypto/account model actually works
 ├── exports\                  # all exported data lives here
-│   ├── master_Bảo_2559848092105805671.json
-│   ├── master_Bảo_2559848092105805671.md
-│   ├── media_master_Bảo_2559848092105805671\
+│   ├── master_<name>_<SELF_CHAT_UID>.json
+│   ├── master_<name>_<SELF_CHAT_UID>.md
+│   ├── media_master_<name>_<SELF_CHAT_UID>\
 │   │   ├── index.json
 │   │   ├── photos\
 │   │   └── videos\
-│   ├── Bảo_2559848092105805671.json   (per-crawl friendly export)
+│   ├── <name>_<uid>.json   (per-crawl friendly export)
 │   └── ...other conversations...
 └── ZaloBackup.exe            (optional, built by you — not committed)
 ```
@@ -219,8 +219,8 @@ H:\zalo-backup\
 **Two accounts, same self-chat**
 1. Log in account A in Zalo, run the tool, export the self-chat.
 2. Log in account B in Zalo, restart debug mode, export the same self-chat.
-3. Hit **🔗 Gộp bản trùng lặp**. The tool finds both exports for "Bảo", deduplicates, and writes
-   `master_Bảo_<uid>.json` + `.md`.
+3. Hit **🔗 Gộp bản trùng lặp**. The tool finds both exports for that chat, deduplicates, and writes
+   `master_<name>_<uid>.json` + `.md`.
 
 **Ongoing, multi-crawl**
 1. Each time you want an up-to-date backup, run the tool, hit **Backup TẤT CẤNG**, then **🔗 Gộp bản trùng lặp**.

@@ -684,9 +684,9 @@ def _backfill_senders(master):
     save.
 
     Aliases: multi-account merges give the SAME fromUid several display names
-    (e.g. 'Tôi' from account A's export vs 'Đoàn Bảo' from account B's export),
+    (e.g. 'Tôi' from account A's export vs 'Chủ tài khoản' from account B's export),
     and the peer appears under the name each account had in its contact list
-    ('Mẹ Bun' vs 'Hồng Thắm'). One canonical name per uid is picked (most
+    ('Người liên hệ 1' vs 'Người liên hệ 1 (tên khác)'). One canonical name per uid is picked (most
     frequent dName; 'Tôi' never wins) and ALL rows of that uid are relabeled,
     so the viewer sees exactly one sender per real person and side-guessing
     (chat bubbles) stays correct."""

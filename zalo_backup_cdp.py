@@ -14,9 +14,9 @@ from pathlib import Path
 import websocket
 
 CDP_HTTP = "http://localhost:8315"
-TARGET_UID = "2559848092105805671"
+TARGET_UID = ""  # <- dán UID hội thoại cần backup vào đây (xem tab viewer / export)
 PAGE_COUNT = 50
-OUT_FILE = Path(r"H:\zalo-backup") / f"messages_{TARGET_UID}.json"
+OUT_FILE = Path(__file__).resolve().parent / f"messages_{TARGET_UID}.json"
 RAW_DIR = Path(r"H:\zalo-backup\raw_batches")
 
 

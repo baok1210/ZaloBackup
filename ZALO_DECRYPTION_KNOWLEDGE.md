@@ -110,17 +110,17 @@ store.getMe()                            // profile of current account
   Practical mapping discovered on this machine:
   | Human | As themselves (storage dir) | As seen from the other account |
   |---|---|---|
-  | "Đoàn Bảo" (+84906217596, username `t_m7e0aa6ifc`, globalId `TOS7N2H5J6MHU9RVF0ORK9J6N74T9JG0`) | `1558295982362900914` | `415420463646174242` |
-  | "Bảo Bv Stamford Guangzhou" (same human, 2nd account) | `415420463646174242` | `3739565505259494135` (and `2559848092105805671` in older cache rows) |
+  | "Chủ tài khoản" (<PHONE>, username `<USERNAME>`, globalId `<GLOBAL_ID>`) | `<OWNER_STORAGE_A>` | `<OWNER_STORAGE_B>` |
+  | "Chủ tài khoản (acc 2)" (same human, 2nd account) | `<OWNER_STORAGE_B>` | `<CONV_UID_ALT>` (and `<SELF_CHAT_UID>` in older cache rows) |
 - Self-chat ("notebook") conversations therefore exist **twice**, once per account,
   with different conv UIDs. Both sides hold the full thread content.
 - In message rows, `fromUid: "0"` means **sent by the account that owns the storage**
   (i.e. "me"). `toUid` is always the conv id. `dName` carries display name of the sender.
 
-Example verified: conv `2559848092105805671` inside storage `415420463646174242`
+Example verified: conv `<SELF_CHAT_UID>` inside storage `<OWNER_STORAGE_B>`
 = the self-chat between these two accounts; 3,892 msgs (2023-07-02 → 2026-09-11),
-2,628 from `fromUid:"0"` (sent from Stamford side) + 1,264 from `2559848092105805671`.
-The same conv in storage `1558295982362900914` is `3739565505259494135`.
+2,628 from `fromUid:"0"` (sent from acc 2 side) + 1,264 from `<SELF_CHAT_UID>`.
+The same conv in storage `<OWNER_STORAGE_A>` is `<CONV_UID_ALT>`.
 
 ---
 
@@ -177,7 +177,7 @@ zsafe-storage.json: {"zsskv":"2","zsskd":{"zshk":"..."}}  (v2 = Electron safeSto
 | File | What it does | Status |
 |---|---|---|
 | `zalo_backup_store.py` | CLI backup via store API. `check` (account + conv presence), `full [N]` (keyset pagination, dedupe, resume from partial, auto-reconnect), saves sorted JSON | ✅ used for the 3,892-msg backup |
-| `zalo_merge.py` | **Two merge modes.** (1) *Cross-account merge* (`merge_group`, `merged_<name>_<ts>.json`): same chat seen from 2 accounts has different UIDs AND msgIds — matched by (type, Δt, content), source-file guard; union-safe. (2) **Snapshot→master** (`fold_snapshot`, `master_<name>_<uid>.json`) — the auto-crawl data layer: crawl #1 (mùng 1) and crawl #2 (mùng 6) are snapshots; the later is the superset, so folding ACCUMULATES: new msgs appended, known ones get `firstSeen/lastSeen`, a message absent from a same-account full crawl that provably covered its position (a newer msg exists) is flagged `missingSince` (likely recalled) with content kept forever; seen again → un-flagged. msgId exact-match fast path (exports now carry msgId in friendly JSON); fuzzy fallback for legacy exports. Same-crawledAt fold is idempotent. WebUI "🔗 Gộp bản trùng lặp" now builds/updates masters. **Device-copy dedup (2026-09-14):** when a message is sent/synced across devices the store returns it TWICE — a PC copy (`src=10`, plain `msgId`) and a phone-sync copy (`src=7`, `msgId` suffixed `_NNN`) — sharing `cliMsgId` but with DIFFERENT `msgId`, ~50 ms apart; dedup by msgId alone kept both and exports showed every own message duplicated. Fix at 3 layers: `fetch_all` collapses copies per `cliMsgId` (keeps the later PC copy = what Zalo displays, live-verified 105→81 rows, 0 dups left); `fold_snapshot` gets a `cliMsgId` fast path + `_heal_device_copies()` self-heals old masters on every fold (cli groups → cli-less same-text ±2 s join → legacy same-second same-text; later row wins, ids/raw merged onto it); `merge_sources` pre-collapses same-file cli copies before cross-file matching. Friendly JSON exports now carry `cliMsgId`. Verified end-to-end: Blue Roses master 105→88, self-chat master 6,452→6,154 (298 device copies), recall/idempotency/cross-account behaviors preserved. **Sender backfill (2026-09-14):** raw store rows frequently carry NO `dName`, so masters folded from raw exports had ~half the rows with an empty sender (viewer showed '?' as the name) and 2-view merges mixed sender labels (own msgs = 'Tôi' in one view, 'Đoàn Bảo' in the other). `save_master` now runs `_backfill_senders()`: evidence = the row's own dName → a fromUid→name map built from rows that DO have dName → the master account's name for fromUid=0/uid rows; ambiguous uids skipped. One-time healing on the real master: 3,244 senders filled from dName evidence (fromUid 0 ↔ 'Bảo Bv Stamford Guangzhou', 2559848092105805671 ↔ 'Đoàn Bảo'), then cross-view label unification → exactly 2 sender names remain (2,210 + 3,944) | ✅ verified: recall cycle (mark→un-mark), permanent recall kept, legacy fuzzy fold, idempotency; real self-chat 2 views → master deduped 6,154 msgs, 0 false recalls (cross-account views never mark missing) |
+| `zalo_merge.py` | **Two merge modes.** (1) *Cross-account merge* (`merge_group`, `merged_<name>_<ts>.json`): same chat seen from 2 accounts has different UIDs AND msgIds — matched by (type, Δt, content), source-file guard; union-safe. (2) **Snapshot→master** (`fold_snapshot`, `master_<name>_<uid>.json`) — the auto-crawl data layer: crawl #1 (mùng 1) and crawl #2 (mùng 6) are snapshots; the later is the superset, so folding ACCUMULATES: new msgs appended, known ones get `firstSeen/lastSeen`, a message absent from a same-account full crawl that provably covered its position (a newer msg exists) is flagged `missingSince` (likely recalled) with content kept forever; seen again → un-flagged. msgId exact-match fast path (exports now carry msgId in friendly JSON); fuzzy fallback for legacy exports. Same-crawledAt fold is idempotent. WebUI "🔗 Gộp bản trùng lặp" now builds/updates masters. **Device-copy dedup (2026-09-14):** when a message is sent/synced across devices the store returns it TWICE — a PC copy (`src=10`, plain `msgId`) and a phone-sync copy (`src=7`, `msgId` suffixed `_NNN`) — sharing `cliMsgId` but with DIFFERENT `msgId`, ~50 ms apart; dedup by msgId alone kept both and exports showed every own message duplicated. Fix at 3 layers: `fetch_all` collapses copies per `cliMsgId` (keeps the later PC copy = what Zalo displays, live-verified 105→81 rows, 0 dups left); `fold_snapshot` gets a `cliMsgId` fast path + `_heal_device_copies()` self-heals old masters on every fold (cli groups → cli-less same-text ±2 s join → legacy same-second same-text; later row wins, ids/raw merged onto it); `merge_sources` pre-collapses same-file cli copies before cross-file matching. Friendly JSON exports now carry `cliMsgId`. Verified end-to-end: Người liên hệ 2 master 105→88, self-chat master 6,452→6,154 (298 device copies), recall/idempotency/cross-account behaviors preserved. **Sender backfill (2026-09-14):** raw store rows frequently carry NO `dName`, so masters folded from raw exports had ~half the rows with an empty sender (viewer showed '?' as the name) and 2-view merges mixed sender labels (own msgs = 'Tôi' in one view, 'Chủ tài khoản' in the other). `save_master` now runs `_backfill_senders()`: evidence = the row's own dName → a fromUid→name map built from rows that DO have dName → the master account's name for fromUid=0/uid rows; ambiguous uids skipped. One-time healing on the real master: 3,244 senders filled from dName evidence (fromUid 0 ↔ 'Chủ tài khoản (acc 2)', <SELF_CHAT_UID> ↔ 'Chủ tài khoản'), then cross-view label unification → exactly 2 sender names remain (2,210 + 3,944) | ✅ verified: recall cycle (mark→un-mark), permanent recall kept, legacy fuzzy fold, idempotency; real self-chat 2 views → master deduped 6,154 msgs, 0 false recalls (cross-account views never mark missing) |
 | `zalo_backup_webui.py` | Local WebUI on **http://localhost:8320** (localhost-only). Lists all conversations of the logged-in account (searchable), format picker **JSON / TXT / CSV / MD**, live progress, in-browser download, "Restart Zalo (debug mode)" button, **Media export button** (see below), JSON friendly-vs-raw checkbox. Endpoints: `/api/status`, `/api/conversations`, `/api/export` (POST uid+fmt+friendly), `/api/progress?job=`, `/api/download?job=`, `/api/restart`, `/api/media` (POST uid), `/api/media/download?job=` | ✅ verified end-to-end |
 | `ZaloBackup.exe` | PyInstaller onefile build of the WebUI (8.7 MB → larger after media deps). Auto-opens browser, picks a free port if 8320 busy, reuses/focuses an already-running instance, exports land in `exports\` next to the exe. New-user friendly: just double-click. SmartScreen "Run anyway" expected (unsigned) | ✅ shipped in `H:\zalo-backup` |
 | Media pipeline (inside webui) | Scans conv messages for photo/video CDN URLs → downloads in parallel (10 threads) → **JXL→JPEG conversion** (Google Photos can't read JPEG XL) → date stamps: EXIF DateTimeOriginal for JPEGs, mp4 `mvhd` creation-time patch + file mtime for videos → incremental ZIP | ✅ |
@@ -187,9 +187,9 @@ zsafe-storage.json: {"zsskv":"2","zsskd":{"zshk":"..."}}  (v2 = Electron safeSto
 | `zalo_backup_cdp.py` | First-gen probe/extractor around `getHistoryMessage` (kept for group convs / history reference) | ⚠ group-only |
 | `zalo_decryption_utils.js/.py` | Field-level crypto helpers (PBKDF2/AES-CBC) | valid, not needed via store API |
 | `ZALO_DECRYPTION_KNOWLEDGE.md` | This file | v2 |
-| `messages_2559848092105805671.json` | Full backup, 3,892 msgs, all fields | ✅ 2026-09-11 |
-| `messages_2559848092105805671_readable.json` | Same, trimmed (time/from/type/text) | ✅ |
-| `exports\` | WebUI output dir (e.g. `Bảo_2559848092105805671.md`, 3.1 MB) | ✅ |
+| `messages_<SELF_CHAT_UID>.json` | Full backup, 3,892 msgs, all fields | ✅ 2026-09-11 |
+| `messages_<SELF_CHAT_UID>_readable.json` | Same, trimmed (time/from/type/text) | ✅ |
+| `exports\` | WebUI output dir (e.g. `<name>_<uid>.md`, 3.1 MB) | ✅ |
 | Run doc for preview: `C:\Users\Admin\Downloads\.freebuff\run.md` | how to start the WebUI detached | ✅ |
 
 WebUI usage pattern after switching accounts: log into the account in Zalo PC →
@@ -360,14 +360,14 @@ exports / master MD / viewer, and msgType-tagged media payloads for the correct 
   every fold). Viewer renders an inline image when the payload exposes `st:true`.
 - `fold_snapshot` perf: the per-type fuzzy index is now incrementally sorted
   (bisect insert) — folding 108k rows takes ~0.7s; the previous re-sort-per-row was
-  O(n²) and hung >7 min on the 108k "Mẹ Bun" conversation (would have hit the daily
+  O(n²) and hung >7 min on the 108k "Người liên hệ 1" conversation (would have hit the daily
   auto-crawl on big chats).
 
 ## Non-photo JSON payloads made human-readable (2026-09-13, part 2)
 
 Beyond stickers, four more payload types used to dump raw JSON into masters:
 - `msgType=3` voice messages: `params.{m4a, duration}` on `voice-aac-dl.zdn.vn`
-  → `[🎙️ Tin nhắn thoại 12s]` (384 rows in "Mẹ Bun"; 99 lack duration).
+  → `[🎙️ Tin nhắn thoại 12s]` (384 rows in "Người liên hệ 1"; 99 lack duration).
 - `msgType=5` doodles (`chat.doodle`): `params.{width,height}`, `oriUrl` png
   → `[🖼️ Doodle 815×1280]` (8 rows).
 - `msgType=17` location shares (`chat.location.new`): `message.desc` already reads
@@ -376,7 +376,7 @@ Beyond stickers, four more payload types used to dump raw JSON into masters:
   label in `params.customMsg.msg.vi/en` → `🧩 Tài khoản ngân hàng` (4 rows).
 - `msgType=1` with `action:"rtf"`: rich text; the real text is in `message.title`.
 `fold_snapshot` self-heals all of these on every fold (raw rows re-derive text via
-`_text_of`; legacy friendly rows fall back to `[Sticker]` for 4/7). Master "Mẹ Bun"
+`_text_of`; legacy friendly rows fall back to `[Sticker]` for 4/7). Master "Người liên hệ 1"
 verified: 0 JSON rows out of 108,094.
 
 ## Voice notes (verified 2026-09-13)
@@ -388,7 +388,7 @@ verified: 0 JSON rows out of 108,094.
   `%APPDATA%/ZaloData/media/<accountUid>/ZaloDownloads/voice/<msgId>` — a raw
   ADTS AAC file (no extension, "MPEG ADTS, AAC, v4 LC, 16 kHz, stereo"), one per
   message actually played on this PC. Measured: 268 cached entries, 100/384 of the
-  "Mẹ Bun" voice notes recoverable (the other 284 were never played locally).
+  "Người liên hệ 1" voice notes recoverable (the other 284 were never played locally).
 - Viewer: `/api/voice?uid=&msgid=` serves local cache first, then proxies the CDN
   with Range pass-through (seekable). Rows expose `vo:true` **only when actually
   playable** (cache hit) so users never see a broken player; other rows keep the
@@ -413,14 +413,14 @@ Self-heal rewrites `[Link] …` rows on every fold via raw payload. Exports
 ## Sender alias merge — one person, several names (2026-09-13)
 
 Multi-account merges gave one fromUid several display names: account A's export
-labels itself "Tôi" while account B's export shows the same uid as "Đoàn Bảo";
-the peer appears as "Mẹ Bun" (46,386 rows) AND "Hồng Thắm" (1,362) because each
+labels itself "Tôi" while account B's export shows the same uid as "Chủ tài khoản";
+the peer appears as "Người liên hệ 1" (46,386 rows) AND "Người liên hệ 1 (tên khác)" (1,362) because each
 account had a different contact name. With 4 "senders" for 2 real people the
 viewer's bubble side-guessing broke (own messages rendered on the peer side).
 Fix in `_backfill_senders` (runs on every master save): count (fromUid → sender)
 pairs, and when a uid has several names pick the canonical one (most frequent;
-"Tôi" never wins) and relabel ALL of that uid's rows. Mẹ Bun master went from 4
-labels to exactly 2 senders: Đoàn Bảo (60,346) + Mẹ Bun (47,748).
+"Tôi" never wins) and relabel ALL of that uid's rows. Người liên hệ 1 master went from 4
+labels to exactly 2 senders: Chủ tài khoản (60,346) + Người liên hệ 1 (47,748).
 Viewer ME-guess upgrade: if exactly one sender is NOT named like any master
 conversation, that side is "me" (own name equals the self-chat conversation name
 in masters merged across both accounts).
@@ -436,7 +436,7 @@ Two fixes make the pipeline self-identifying:
    display name wins). Masters now always show one label per real person.
 Viewer: ME-guess prefers the sender not named like any master conversation;
 guess key bumped to `zme2_<uid>` so stale wrong guesses are discarded once.
-Verified: Mẹ Bun auto-guess = Đoàn Bảo, 215 own bubbles, persisted.
+Verified: Người liên hệ 1 auto-guess = Chủ tài khoản, 215 own bubbles, persisted.
 
 ## Smoke test (`smoke_test.mjs`, 2026-09-13)
 
@@ -448,7 +448,7 @@ Playwright script opening every master in the live viewer and asserting:
    with the auto-guess;
 5. **voice-plays / sticker-renders** — flagged rows actually render inline media
    that loads (audio readyState>0, image naturalWidth>0).
-First run caught 5,382 leftover JSON rows in the Bảo/Blue Roses masters (legacy
+First run caught 5,382 leftover JSON rows in the self-chat/contact masters (legacy
 photo/video/URL payloads that predate the self-heal rules) — healed via
 pretty_media_text; all masters now pass.
 Run: `npm run smoke` (server must be running on :8320).
@@ -463,7 +463,7 @@ thật đều mang title = tiêu đề trang web. Đã sửa 3 lớp:
 2. `heal_master_texts()` — hàm heal tách riêng, chạy tự động trước mỗi lần fold; raw rows heal theo action thật.
 3. Legacy friendly rows (raw=null): chỉ đổi khi title nhận diện được (`sendBubbleMessage`),
    KHÔNG đụng `[Link]` trống hoặc `[Link] https://…` (link thật).
-Healed: master_Blue Roses 6/6 dòng; smoke test PASS toàn bộ.
+Healed: master_Người liên hệ 2 6/6 dòng; smoke test PASS toàn bộ.
 
 ## UI redesign theo taste-skill (2026-09-13, commit 74afc61)
 

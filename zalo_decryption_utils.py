@@ -196,7 +196,7 @@ class ZaloPCClient:
         """Get current user info"""
         js = '''
         (async () => {
-            const mod = window.webpackJsonp.push([[Math.random()],{},[["XS0u"]]]).default;
+            const mod = window.webpackJsonp.push([[Math.random()],{{}},[["XS0u"]]]).default;
             return JSON.stringify(await mod.getMe());
         })()
         '''
@@ -206,8 +206,8 @@ class ZaloPCClient:
         """Get message history"""
         js = f'''
         (async () => {{
-            const mod = window.webpackJsonp.push([[Math.random()],{},[["fBUP"]]]).default;
-            const encMod = window.webpackJsonp.push([[Math.random()],{},[["z0WU"]]]).default;
+            const mod = window.webpackJsonp.push([[Math.random()],{{}},[["fBUP"]]]).default;
+            const encMod = window.webpackJsonp.push([[Math.random()],{{}},[["z0WU"]]]).default;
             
             const response = await mod.getHistoryMessage('{uid}', {count}{",'" + offset_message_id + "'" if offset_message_id else ''});
             
@@ -223,7 +223,7 @@ class ZaloPCClient:
         """Get friends list"""
         js = '''
         (async () => {
-            const mod = window.webpackJsonp.push([[Math.random()],{},[["XS0u"]]]).default;
+            const mod = window.webpackJsonp.push([[Math.random()],{{}},[["XS0u"]]]).default;
             return JSON.stringify(await mod.getFriends());
         })()
         '''
@@ -233,7 +233,7 @@ class ZaloPCClient:
         """Get groups list"""
         js = '''
         (() => {
-            const mod = window.webpackJsonp.push([[Math.random()],{},[["Gm1y"]]]).default;
+            const mod = window.webpackJsonp.push([[Math.random()],{{}},[["Gm1y"]]]).default;
             return JSON.stringify(mod.getGroupsListSync());
         })()
         '''
@@ -330,7 +330,7 @@ if __name__ == '__main__':
     
     # Example 2: Connect and extract
     print("\n=== Example 2: Extract Messages ===")
-    TARGET_UID = '2559848092105805671'  # Đoàn Bảo
+    TARGET_UID = ''  # <- set the target conversation UID here
     OUTPUT_DIR = r'C:\Users\Admin\AppData\Local\Temp\zalo-backup'
     
     try:

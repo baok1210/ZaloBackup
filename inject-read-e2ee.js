@@ -3,7 +3,7 @@
 
   // Open database
   const db = await new Promise((resolve, reject) => {
-    const req = indexedDB.open('zdb_415420463646174242', 76);
+    const req = indexedDB.open('zdb_<OWNER_ID>', 76)  // DevTools > Application > IndexedDB: find your own zdb_<id>;
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
