@@ -31,3 +31,9 @@ desktop.ini
 
 # Freebuff workspace (thread-scoped, not part of the open-source repo).
 .freebuff/
+
+# Smoke test deps (Playwright) — not part of the shipped tool.
+node_modules/
+
+# Helper runner EXE built separately.
+ZaloAutoCrawl.exe

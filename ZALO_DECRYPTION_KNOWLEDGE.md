@@ -464,3 +464,32 @@ thật đều mang title = tiêu đề trang web. Đã sửa 3 lớp:
 3. Legacy friendly rows (raw=null): chỉ đổi khi title nhận diện được (`sendBubbleMessage`),
    KHÔNG đụng `[Link]` trống hoặc `[Link] https://…` (link thật).
 Healed: master_Blue Roses 6/6 dòng; smoke test PASS toàn bộ.
+
+## UI redesign theo taste-skill (2026-09-13, commit 74afc61)
+
+Audit-first theo skill `redesign-existing-projects` (github.com/Leonxlnx/taste-skill):
+Scan → Diagnose → Fix theo độ ưu tiên font → màu → states → layout → polish.
+Các quyết định thiết kế cần GIỮ khi sửa UI về sau:
+
+1. **Một hệ token chung cho cả 2 trang** (HTML + VIEWER_HTML trong zalo_backup_webui.py):
+   `--bg:#0b1220 --panel:#121a2c --panel2:#0d1424 --line:#223049 --tx:#e9eef7 --dim:#93a5c4
+   --acc:#5aa9ff --ok:#43d17c --warn:#ffb454 --err:#ff6b6b` + `--r-lg:14px --r-md:10px`.
+   Đổi màu/radius phải sửa ở CẢ HAI khối `:root`.
+2. **Font — KHÔNG tải font ngoài** (đúng lời hứa "dữ liệu không rời khỏi máy", localhost thuần):
+   `--font-ui: "Segoe UI Variable Text","Segoe UI",system-ui` · `--font-disp: "Segoe UI Variable
+   Display","Bahnschrift"` (tiêu đề, tracking -0.02em) · `--font-mono: "Cascadia Mono",Consolas`
+   cho UID/timestamp. Số liệu dạng bảng luôn `font-variant-numeric: tabular-nums`.
+3. **Nút hành động = tinted translucent, không màu nền đặc**: `.tint-ok` (media), `.tint-warn`
+   (backup-all), `.tint-acc2` (merge), `.tint-err` (hủy). Chỉ nút chính dùng nền accent đặc.
+   Cấm inline `style="background:..."` trên nút — đã từng tạo hàng "cầu vồng" 4 màu.
+4. **States bắt buộc** trên mọi element tương tác: hover (brightness/border), `:active`
+   (`scale(.985)`/`translateY(1px)`), `:focus-visible` (outline 2px accent), transition 150ms.
+   `prefers-reduced-motion: reduce` phải tắt hết animation.
+5. **Bề mặt**: shadow tint theo nền (`rgba(2,8,22,.35)`, không đen thuần), noise overlay 2.5%
+   chống flat, scrollbar + `::selection` theo theme, `100dvh` thay `100vh`, sticky day-header
+   frosted (`backdrop-filter: blur(8px)`).
+6. **Loading state**: bảng hội thoại hiện 5 dòng skeleton (`tr.skl` + `.skbar` shimmer) trong lúc
+   chờ `/api/conversations` — không bao giờ để bảng trắng trơn.
+
+Tham khảo đầy đủ quy trình audit: mục "Design Audit" trong SKILL.md của taste-skill
+(font/palette/layout/states/content/icons/code-quality).
