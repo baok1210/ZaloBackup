@@ -8,6 +8,8 @@ Chạy:  python zalo_backup_webui.py     # mở http://localhost:8320
 """
 import csv
 import io
+import base64
+import glob
 import json
 import os
 import re
@@ -62,7 +64,7 @@ JOBS = {}  # job_id -> {"status","uid","name","fmt","done","total","file","error
 
 
 # ---------------------------------------------------------------- media helpers
-MEDIA_KINDS = {"2": "image", "18": "video"}  # msgType -> kind
+MEDIA_KINDS = {"2": "image", "7": "image", "18": "video"}  # msgType -> kind (7 = sticker/GIF)
 UA_HDRS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ZaloPC/26.8.20",
            "Referer": "https://chat.zalo.me/"}
 
@@ -253,7 +255,7 @@ def run_media_job(job_id, uid, cancel=None):
             urls = _media_url_chain(m)
             if urls:
                 media.append((k, urls, int(m.get("serverTime") or m.get("sendDttm") or 0),
-                              str(m.get("msgId") or "")))
+                              str(m.get("msgId") or ""), m))
         job["status"], job["done"], job["total"] = "downloading", 0, len(media)
         job["found"] = len(media)
         if not media:
@@ -267,10 +269,14 @@ def run_media_job(job_id, uid, cancel=None):
         LOCK = threading.Lock()
 
         def fetch_one(idx_item):
-            i, (k, url_chain, ts, mid) = idx_item
+            i, (k, url_chain, ts, mid, m) = idx_item
             dt = datetime.fromtimestamp(ts / 1000) if ts else datetime.now()
             base = dt.strftime("%Y%m%d_%H%M%S")
-            name = f"photos/{base}_{mid[:10]}_{i}.jpg" if k == "image" else f"videos/{base}_{mid[:10]}_{i}.mp4"
+            # stickers (msgType 7, GIF/PNG) keep their real extension and go to stickers/
+            folder = "videos" if k == "video" else ("stickers" if str(m.get("msgType")) == "7" else "photos")
+            name = f"{folder}/{base}_{mid[:10]}_{i}.mp4" if k == "video" else \
+                   f"{folder}/{base}_{mid[:10]}_{i}.gif" if folder == "stickers" else \
+                   f"{folder}/{base}_{mid[:10]}_{i}.jpg"
             data = None
             last_err = None
             for url in url_chain:  # CDN links die at different times — try every variant
@@ -286,13 +292,13 @@ def run_media_job(job_id, uid, cancel=None):
                 return ("fail", None, name)
             kind = _sniff(data)
             try:
-                if k == "image":
+                if k == "image" and folder != "stickers":
                     data, ext = _convert_image(data, dt)
                     name = name[:-3] + ext
                 elif kind == "mp4":
                     data = _stamp_mp4(data, dt)
                 else:
-                    name = name[:-3] + kind  # unexpected kind for this msg — keep honest ext
+                    name = name[:-3] + kind  # keep the honest extension (stickers: real gif/png/webp)
             except Exception:
                 pass
             return ("ok", zipfile.ZipInfo(name, date_time=dt.timetuple()[:6]), data)
@@ -1060,6 +1066,7 @@ VIEWER_MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
                ".webp": "image/webp", ".gif": "image/gif", ".mp4": "video/mp4",
                ".webm": "video/webm", ".mov": "video/quicktime"}
 _M_CACHE = {}  # path -> (mtime, size, parsed dict)
+_STK_IDX = {"t": 0, "m": {}}  # catalog-sticker cache index (catId,id) -> file; 60s TTL
 _AUDIT_STATE = {}  # uid -> {running, done, total} for background media-link audit
 
 
@@ -1091,7 +1098,7 @@ def _viewer_media_info(uid, with_files=False):
     d = _viewer_media_dir_for(uid)
     if not d:
         return None
-    photos = videos = 0
+    photos = videos = stickers = 0
     total = 0
     files = []
     try:
@@ -1102,23 +1109,28 @@ def _viewer_media_info(uid, with_files=False):
                 videos += 1
             elif rel.startswith("photos/"):
                 photos += 1
+            elif rel.startswith("stickers/"):
+                stickers += 1
             total += v.get("bytes") or 0
             if with_files:
                 sa = v.get("sentAt")
                 files.append({"file": rel, "bytes": v.get("bytes") or 0,
                               "sentAt": "%04d-%02d-%02d %02d:%02d:%02d" % tuple(sa) if sa else None,
-                              "msgType": "18" if rel.startswith("videos/") else ("2" if rel.startswith("photos/") else None),
+                              "msgType": "18" if rel.startswith("videos/") else ("7" if rel.startswith("stickers/") else "2"),
                               "alsoAs": len(v.get("alsoAs") or [])})
     except Exception:
-        for sub, isv in (("photos", False), ("videos", True)):
-            p = os.path.join(d, sub)
-            if os.path.isdir(p):
-                n = len([x for x in os.listdir(p) if not x.startswith(".")])
-                if isv:
-                    videos += n
-                else:
-                    photos += n
-    info = {"dir": os.path.basename(d), "photos": photos, "videos": videos, "bytes": total}
+            for sub, isv in (("photos", False), ("videos", True), ("stickers", None)):
+                p = os.path.join(d, sub)
+                if os.path.isdir(p):
+                    n = len([x for x in os.listdir(p) if not x.startswith(".")])
+                    if isv:
+                        videos += n
+                    elif isv is None:
+                        stickers += n
+                    else:
+                        photos += n
+    info = {"dir": os.path.basename(d), "photos": photos, "videos": videos,
+            "stickers": stickers, "bytes": total}
     if with_files:
         files.sort(key=lambda x: x.get("sentAt") or "", reverse=True)
         info["files"] = files
@@ -1178,7 +1190,7 @@ def _viewer_master_path(uid):
 
 
 def _viewer_media_map(msgs, uid):
-    """Assign media-master files to photo/video messages by msgType + send-time.
+    """Assign media-master files to photo/video/sticker messages by msgType + send-time.
     One shared implementation for the viewer payload and the media audit."""
     photo_list = []  # (epoch_seconds, rel, msgType)
     md = _viewer_media_dir_for(uid)
@@ -1191,6 +1203,8 @@ def _viewer_media_map(msgs, uid):
                     mt = "2"
                 elif rel.startswith("videos/"):
                     mt = "18"
+                elif rel.startswith("stickers/"):
+                    mt = "7"
                 else:
                     mt = None
                 if not mt:
@@ -1213,7 +1227,7 @@ def _viewer_media_map(msgs, uid):
     eps = [p[0] for p in photo_list]
     for m in msgs:
         rel = None
-        if str(m.get("msgType") or "") in ("2", "18"):
+        if str(m.get("msgType") or "") in ("2", "18", "7"):
             t = m.get("time") or ""
             try:
                 import calendar
@@ -1256,7 +1270,7 @@ def _viewer_media_stats(uid, max_probe=80):
     except Exception:
         return None
     msgs = d.get("messages") or []
-    mmsgs = [m for m in msgs if str(m.get("msgType") or "") in ("2", "18")]
+    mmsgs = [m for m in msgs if str(m.get("msgType") or "") in ("2", "18")]  # stickers served separately
     assign = _viewer_media_map(mmsgs, uid)
     saved = sum(1 for r in assign if r)
     # link probe: URL per message from stored raw payload
@@ -1412,12 +1426,193 @@ def _viewer_api_master(uid, d1, d2):
         rec = {k: m.get(k) for k in keys}
         if rel:
             rec["f"] = rel
+        if str(m.get("msgType")) == "7" and _stk_urls_of(m):
+            rec["st"] = True   # sticker image servable via /api/stickerthumb
+        elif str(m.get("msgType")) == "4" and _stk_cache_file(m):
+            rec["st"] = True   # catalog sticker found in Zalo PC's local cache
         out.append(rec)
     # NOTE: media payload gets msgType per file so the UI can pick the right renderer
     return {"conversation": d.get("conversation"), "uid": str(d.get("uid") or ""),
             "masterFile": os.path.basename(fp), "total": len(msgs), "count": len(out),
             "messages": out, "media": _viewer_media_info(uid, with_files=True),
             "mediaStats": _viewer_media_stats(uid)}
+
+
+def _serve_local_file(self, fp, ctype=None):
+    """Stream a local file with Range support (shared by mediafile/sticker routes)."""
+    ctype = ctype or VIEWER_MIME.get(os.path.splitext(fp)[1].lower(), "application/octet-stream")
+    size = os.path.getsize(fp)
+    start, end = 0, size - 1
+    rng = self.headers.get("Range")
+    code = 200
+    if rng and rng.startswith("bytes="):
+        try:
+            s, e = rng[6:].split("-", 1)
+            start = int(s) if s else 0
+            end = min(int(e) if e else size - 1, size - 1)
+            if start > end or start >= size:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.end_headers()
+                return
+            code = 206
+        except ValueError:
+            pass
+    self.send_response(code)
+    self.send_header("Content-Type", ctype)
+    self.send_header("Accept-Ranges", "bytes")
+    if code == 206:
+        self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+    self.send_header("Content-Length", str(end - start + 1))
+    self.end_headers()
+    with open(fp, "rb") as f:
+        f.seek(start)
+        remaining = end - start + 1
+        while remaining > 0:
+            chunk = f.read(min(262144, remaining))
+            if not chunk:
+                break
+            try:
+                self.wfile.write(chunk)
+            except (ConnectionAbortedError, BrokenPipeError):
+                return
+            remaining -= len(chunk)
+
+
+def _serve_bytes(self, data, ctype="image/gif"):
+    self.send_response(200)
+    self.send_header("Content-Type", ctype)
+    self.send_header("Cache-Control", "max-age=86400")
+    self.send_header("Content-Length", str(len(data)))
+    self.end_headers()
+    try:
+        self.wfile.write(data)
+    except (ConnectionAbortedError, BrokenPipeError):
+        pass
+
+
+def _stk_urls_of(m):
+    """CDN URLs for a sticker row's raw payload — small/thumb variants FIRST
+    (inline display wants the light _s.gif; the big _l.gif can be hundreds of KB)."""
+    urls = []
+    raw = m.get("raw") if isinstance(m.get("raw"), dict) else None
+    v = (raw or {}).get("message")
+    if isinstance(v, dict):
+        p = v.get("params")
+        pj = {}
+        if isinstance(p, str) and p.startswith("{"):
+            try:
+                pj = json.loads(p) or {}
+            except Exception:
+                pj = {}
+        u = v.get("thumbUrl")
+        if isinstance(u, str) and u.startswith("http") and u not in urls:
+            urls.append(u)
+        for k in ("small", "thumb", "hd"):
+            u = pj.get(k)
+            if isinstance(u, str) and u.startswith("http") and u not in urls:
+                urls.append(u)
+        for k in ("oriUrl", "normalUrl", "hdUrl"):
+            u = v.get(k)
+            if isinstance(u, str) and u.startswith("http") and u not in urls:
+                urls.append(u)
+    return urls
+
+
+def _stk_cache_index():
+    """Catalog stickers (msgType 4): Zalo PC caches their images under
+    %APPDATA%/ZaloData/media/<account>/sticker/<catId>/<stickerId>/<hash>.png|gif.
+    Index them (catId,id) -> file; rebuilt at most every 60s."""
+    now = time.time()
+    if _STK_IDX["m"] and now - _STK_IDX["t"] < 60:
+        return _STK_IDX["m"]
+    idx = {}
+    for sdir in glob.glob(os.path.expandvars(r"%APPDATA%/ZaloData/media/*/sticker")):
+        try:
+            cats = os.listdir(sdir)
+        except OSError:
+            continue
+        for cat in cats:
+            cdir = os.path.join(sdir, cat)
+            if not os.path.isdir(cdir):
+                continue
+            try:
+                sids = os.listdir(cdir)
+            except OSError:
+                continue
+            for sid in sids:
+                fdir = os.path.join(cdir, sid)
+                if not os.path.isdir(fdir):
+                    continue
+                try:
+                    for f in os.listdir(fdir):
+                        if not f.startswith(".") and \
+                                f.lower().endswith((".png", ".gif", ".jpg", ".webp")):
+                            idx[(cat, sid)] = os.path.join(fdir, f)
+                            break
+                except OSError:
+                    continue
+    _STK_IDX["t"], _STK_IDX["m"] = now, idx
+    return idx
+
+
+def _stk_cache_file(m):
+    """Local cached image for a catalog-sticker row, or None."""
+    raw = m.get("raw") if isinstance(m.get("raw"), dict) else None
+    v = (raw or {}).get("message")
+    if isinstance(v, dict) and v.get("catId") is not None:
+        return _stk_cache_index().get((str(v.get("catId")), str(v.get("id"))))
+    return None
+
+
+def _viewer_stickerthumb(self, qs):
+    """Serve a sticker image: media-master file first (survives everything),
+    else proxy the row's CDN gif URL (zalo-gif.zadn.vn lives far longer than the
+    photo CDN; proxying avoids hotlink/mixed-content trouble in the browser)."""
+    uid = qs.get("uid", [""])[0]
+    msgid = qs.get("msgid", [""])[0]
+    fp = _viewer_master_path(uid)
+    if not fp or not msgid:
+        self._json({"error": "not found"}, 404); return
+    try:
+        d = _viewer_load_master(fp)
+        msgs = d.get("messages") or []
+        assign = _viewer_media_map(msgs, uid)   # stickers/ files map to type-7 rows too
+        for m, rel in zip(msgs, assign):
+            t = str(m.get("msgType") or "")
+            if t not in ("4", "7") or str(m.get("msgId") or "") != msgid:
+                continue
+            # 1) downloaded file in the media master (survives everything)
+            if rel:
+                md = _viewer_media_dir_for(uid)
+                ffp = os.path.realpath(os.path.join(md, rel)) if md else ""
+                if md and ffp.startswith(os.path.realpath(md) + os.sep) and os.path.isfile(ffp):
+                    _serve_local_file(self, ffp)
+                    return
+            # 2) Zalo PC's own sticker cache (catalog stickers, type 4)
+            if t == "4":
+                f = _stk_cache_file(m)
+                if f and os.path.isfile(f):
+                    _serve_local_file(self, f)
+                    return
+            # 3) proxy the CDN gif (zalo-gif links live far longer than photo CDN)
+            for u in _stk_urls_of(m):
+                try:
+                    data = _http_get(u, timeout=15, retries=1)
+                    if data:
+                        _serve_bytes(self, data, "image/gif")
+                        return
+                except Exception:
+                    continue
+            break
+        self._json({"error": "not found"}, 404)
+    except (ConnectionAbortedError, BrokenPipeError):
+        pass
+    except Exception as e:
+        try:
+            self._json({"error": str(e)[:200]}, 500)
+        except Exception:
+            pass
 
 
 def _viewer_mediafile(self, qs):
@@ -1516,6 +1711,7 @@ label.chk{color:var(--dim);font-size:12.5px;display:flex;align-items:center;gap:
 .msg .w{min-width:92px;text-align:right;color:var(--dim);font-size:12px;padding-top:2px}
 .msg .s{font-weight:600;color:var(--acc);font-size:12.5px}
 .msg .x{white-space:pre-wrap;word-break:break-word}
+.stk{max-width:150px;max-height:150px;border-radius:8px;display:block;margin:2px 0}
 .msg.media .x{color:var(--dim);font-style:italic}
 .msg.recalled{background:#2a1215;border-radius:8px}.msg.recalled .x{color:var(--warn);text-decoration:line-through}
 .rec{color:var(--warn);font-size:11px;margin-top:2px}
@@ -1619,7 +1815,8 @@ let MASTERS=[],CUR=null,DATA=null,view='msg',shown=0,ME_GUESS=null,ME_OPTS='',ZB
 const jget=u=>fetch(u).then(r=>r.json());
 const jgetQ=u=>fetch(u).then(r=>r.ok?r.json():null).catch(()=>null);
 const esc=s=>(s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const TYPE_ICON={2:'🖼',3:'🎨',4:'📷',6:'📎',7:'📎',18:'📎',19:'🔗',22:'📎',24:'🔗',28:'🎙',31:'🎬',32:'🎙',37:'🎬'};
+const TYPE_ICON={2:'🖼',3:'🎨',4:'📷',6:'📎',7:'🎨',18:'📎',19:'🔗',22:'📎',24:'🔗',28:'🎙',31:'🎬',32:'🎙',37:'🎬'};
+const stkUrl=m=>'/api/stickerthumb?uid='+encodeURIComponent(DATA.uid)+'&msgid='+encodeURIComponent(m.msgId||'');
 function prettyText(m){
   const mt=+m.msgType||0;const raw=m.text||'';
   if(mt===2&&raw.trim().startsWith('{')){
@@ -1764,8 +1961,9 @@ function drawMsgs(){
     const d=(m.time||'').slice(0,10);
     if(d!==day){day=d;html+=`<div class="dayhdr">${esc(d)}</div>`}
     const mt=+m.msgType||0,icon=TYPE_ICON[mt]||'';
-    const pt=prettyText(m);
-    const txt=esc(zEscapeBlobs(pt));
+    const stk=(mt===7||mt===4)&&m.st;
+    const pt=stk?'':prettyText(m);
+    const txt=stk?'':esc(zEscapeBlobs(pt));
     const cp=m.copies>1?` · ${m.copies} bản (gộp 2 account)`:'';
     // SIMPLE mode: only time / sender / content — no technical metadata.
     // TECHNICAL mode: full forensics (msgId, firstSeen/lastSeen, recall details).
@@ -1777,7 +1975,7 @@ function drawMsgs(){
     html+=`<div class="msg ${mt!==1?'media':''} ${m.missingSince?'recalled':''}"${tip}>
       <div class="t">${esc(tm)}</div>
       <div class="w"><div class="s">${esc(m.sender||'?')}</div>${icon&&!simple?`<div style="font-size:10.5px">${icon}</div>`:''}</div>
-      <div class="x">${txt||'<i>(không có nội dung)</i>'}${rec}</div></div>`;
+      <div class="x">${stk?`<img class="stk" loading="lazy" src="${stkUrl(m)}" alt="Sticker">`:(txt||'<i>(không có nội dung)</i>')}${rec}</div></div>`;
   }
   const rest=msgs.length-part.length;
   if(rest>0)html+=`<button class="more" onclick="shown=${part.length};drawMsgs()">Hiện thêm ${Math.min(CHUNK,rest)} / còn ${rest}</button>`;
@@ -1788,7 +1986,7 @@ function drawMsgs(){
 function drawMedia(){
   const md=DATA.media;
   if(!md||!(md.files||[]).length){$('content').innerHTML='<div class="empty">Chưa có media master cho hội thoại này.<br>Chạy "Tải tất cả ảnh &amp; video" rồi "Gộp bản trùng lặp".</div>';return}
-  let html=`<div class="dayhdr" style="margin-top:14px">${md.photos} ảnh · ${md.videos} video · ${fmtB(md.bytes)} — mới nhất trước</div><div id="grid">`;
+  let html=`<div class="dayhdr" style="margin-top:14px">${md.photos} ảnh · ${md.videos} video${md.stickers?` · ${md.stickers} sticker`:''} · ${fmtB(md.bytes)} — mới nhất trước</div><div id="grid">`;
   for(const f of md.files){
     const mt=f.msgType||0;
     const u=`/api/mediafile?uid=${encodeURIComponent(DATA.uid)}&f=${encodeURIComponent(f.file)}`;
@@ -1844,6 +2042,8 @@ function drawZalo(){
       inner=mt===18
         ?'<video class="zmsgvid" controls preload="metadata" src="'+u+'"></video><span class="zmedia-meta">📅 '+esc(m.time||'')+'</span>'
         :'<img class="zmsgimg" loading="lazy" src="'+u+'" alt="" onclick="zLb(this.src)"><span class="zmedia-meta">📅 '+esc(m.time||'')+'</span>';
+    }else if((mt===7||mt===4)&&m.st){
+      inner='<img class="stk" loading="lazy" src="'+stkUrl(m)+'" alt="Sticker" onclick="zLb(this.src)">';
     }else{
       const pt=prettyText(m);
       inner=esc(zEscapeBlobs(pt))||'<i>(không có nội dung)</i>';
@@ -1949,6 +2149,16 @@ class Handler(BaseHTTPRequestHandler):
         elif p == "/api/mediafile":
             try:
                 _viewer_mediafile(self, parse_qs(urlparse(self.path).query))
+            except (ConnectionAbortedError, BrokenPipeError):
+                pass
+            except Exception as e:
+                try:
+                    self._json({"error": str(e)[:200]}, 500)
+                except Exception:
+                    pass
+        elif p == "/api/stickerthumb":
+            try:
+                _viewer_stickerthumb(self, parse_qs(urlparse(self.path).query))
             except (ConnectionAbortedError, BrokenPipeError):
                 pass
             except Exception as e:

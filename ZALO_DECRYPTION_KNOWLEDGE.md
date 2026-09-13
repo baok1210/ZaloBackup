@@ -335,3 +335,30 @@ exports / master MD / viewer, and msgType-tagged media payloads for the correct 
   messages recalled *before* the first crawl are unrecoverable by any tool; messages recalled
   *after* a crawl stay in the master with `missingSince`; the daily schedule minimizes the
   recalled-before-first-crawl window and downloads media links while alive.
+
+## Stickers (verified 2026-09-13)
+
+- Two sticker kinds in the store:
+  - `msgType=7` — sent sticker / GIF (`originMsgType=chat.gif` etc.): `message` carries
+    `oriUrl/thumbUrl/hdUrl` + `params.{hd,small,thumb}` on the **old gif CDN**
+    (`zalo-gif.zadn.vn`). Probed 17/17: 16 still alive after 5 years — this CDN
+    expires far slower than the photo CDN. `previewThumb` is **null** for stickers
+    (unlike photos).
+  - `msgType=4` — catalog sticker: `message = {type:"7", catId, id, extInfo}` with
+    **no URL at all** (`extInfo.params.thumbUrl` empty in practice; `previewThumb` null).
+    Zalo PC renders them from a local cache:
+    `%APPDATA%/ZaloData/media/<accountUid>/sticker/<catId>/<stickerId>/<md5>.png|gif`.
+    Coverage is partial (cached only when the sticker pack was downloaded/used):
+    measured 8,174/10,059 messages = 900 distinct (catId,id), 589 in cache (65%).
+- Display pipeline (`/api/stickerthumb?uid=&msgid=`), in priority order:
+  1. downloaded file in the media master (`stickers/` folder — media downloader now
+     treats msgType 7 as a sticker, keeps the real extension, no JXL re-encode);
+  2. Zalo PC's local sticker cache (type 4, index rebuilt every 60s);
+  3. proxy of the row's CDN gif URL (Zalo UA, small `params.small` variant first —
+     65 KB vs 2.9 MB for `_l.gif`).
+- Masters store `[Sticker]` as the text for types 4/7 (legacy JSON dumps self-heal on
+  every fold). Viewer renders an inline image when the payload exposes `st:true`.
+- `fold_snapshot` perf: the per-type fuzzy index is now incrementally sorted
+  (bisect insert) — folding 108k rows takes ~0.7s; the previous re-sort-per-row was
+  O(n²) and hung >7 min on the 108k "Mẹ Bun" conversation (would have hit the daily
+  auto-crawl on big chats).

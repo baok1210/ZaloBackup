@@ -65,6 +65,10 @@ def _text_of(row):
         if isinstance(row.get("text"), str):
             return row["text"]
         return ""
+    if _type_of(row) == "7":
+        return "[Sticker]"          # sticker payload dict — don't dump raw JSON
+    if _type_of(row) == "4":
+        return "[Sticker]"          # catalog sticker (catId/id payload)
     return json.dumps(v, ensure_ascii=False, sort_keys=True)
 
 
@@ -209,6 +213,8 @@ def pretty_media_text(mt, txt=None, params=None):
         except Exception:
             return txt
     p = params or {}
+    if t in ("7", "4"):
+        return "[Sticker]"
     if t == "2":
         w, h = p.get("width"), p.get("height")
         dim = f" {w}×{h}" if w and h else ""
@@ -243,7 +249,7 @@ def _friendly_row(r, peer_name=""):
     except Exception:
         t = ""
     txt = r["text"]
-    if r["type"] in ("2", "18"):
+    if r["type"] in ("2", "18", "7", "4"):
         txt = pretty_media_text(r["type"], txt)
     return {"time": t, "sender": r["sender"] or ("Tôi" if r["raw"] and
             str(r["raw"].get("fromUid")) == "0" else peer_name or "?"),
@@ -454,15 +460,22 @@ def fold_snapshot(master, rows, crawled_at=None, complete=True):
     crawled_at = crawled_at or _now_str()
     msgs = master.setdefault("messages", [])
     _heal_device_copies(msgs)                 # collapse pre-fix duplicates
+    for m in msgs:                            # self-heal legacy sticker JSON dumps
+        if str(m.get("msgType")) in ("4", "7") and \
+                str(m.get("text") or "").lstrip().startswith("{"):
+            m["text"] = "[Sticker]"
     by_id = {m["msgId"]: m for m in msgs if m.get("msgId")}
     by_cli = {m["cliMsgId"]: m for m in msgs if m.get("cliMsgId")}
     # per-type ts-sorted index over ALL master rows (any row can fuzzy-match a
-    # msgId-less snapshot row — e.g. the same message seen from another account)
-    fuzzy = {}
+    # msgId-less snapshot row — e.g. the same message seen from another account).
+    # Kept incrementally sorted (bisect.insort) + a parallel ts array so folding
+    # a 30k-row snapshot stays O(n log n), not O(n²).  # perf: was re-sort+rebuild per row
+    fuzzy, ts_arr = {}, {}
     for m in msgs:
         fuzzy.setdefault(m["msgType"], []).append([m["_ts"], m])
-    for v in fuzzy.values():
+    for t, v in fuzzy.items():
         v.sort(key=lambda p: p[0])
+        ts_arr[t] = [p[0] for p in v]
 
     import bisect
     n_new = n_upd = 0
@@ -475,7 +488,7 @@ def fold_snapshot(master, rows, crawled_at=None, complete=True):
         if m is None:
             win = WINDOW_TEXT if r["type"] == "1" else WINDOW_OTHER
             lst = fuzzy.setdefault(r["type"], [])
-            ts_list = [p[0] for p in lst]
+            ts_list = ts_arr.setdefault(r["type"], [])
             i = bisect.bisect_left(ts_list, r["ts"] - win)
             best = None
             while i < len(lst) and lst[i][0] <= r["ts"] + win:
@@ -503,8 +516,10 @@ def fold_snapshot(master, rows, crawled_at=None, complete=True):
                 by_id[m["msgId"]] = m
             if m["cliMsgId"]:
                 by_cli[m["cliMsgId"]] = m
-            fuzzy.setdefault(m["msgType"], []).append([m["_ts"], m])
-            fuzzy[m["msgType"]].sort(key=lambda p: p[0])
+            nl = fuzzy.setdefault(m["msgType"], [])
+            nt = ts_arr.setdefault(m["msgType"], [])
+            j = bisect.bisect_left(nt, m["_ts"])
+            nl.insert(j, [m["_ts"], m]); nt.insert(j, m["_ts"])
         else:
             n_upd += 1
             m["lastSeen"] = crawled_at
