@@ -467,7 +467,32 @@ def fetch_all(uid, progress=None, cdp=None):
         time.sleep(0.25)
     arr = sorted(msgs.values(),
                  key=lambda m: str(m.get("serverTime") or m.get("sendDttm") or ""))
-    return arr, total
+
+    # Collapse multi-device copies: when a message was sent from / synced across
+    # devices, the store returns it TWICE — a PC copy (src=10, plain msgId) and
+    # a phone-sync copy (src=7, msgId suffixed `_NNN`) — sharing cliMsgId but
+    # carrying different msgId, ~50 ms apart. Deduping by msgId alone kept both,
+    # so exports showed every own-device message duplicated. Keep the copy Zalo
+    # displays (later serverTime, then larger msgId) per cliMsgId.
+    def _copykey(m):
+        return (int(str(m.get("serverTime") or m.get("sendDttm") or 0) or 0),
+                str(m.get("msgId") or ""))
+
+    best = {}
+    for m in arr:
+        cli = str(m.get("cliMsgId") or "")
+        if cli and (cli not in best or _copykey(m) > _copykey(best[cli])):
+            best[cli] = m
+    out, done = [], set()
+    for m in arr:
+        cli = str(m.get("cliMsgId") or "")
+        if cli:
+            if cli in done:
+                continue
+            done.add(cli)
+            m = best[cli]
+        out.append(m)
+    return out, total
 
 
 # ---------------------------------------------------------------- formatters
@@ -532,6 +557,7 @@ def build_output(msgs, fmt, uid, conv_name, me_uid, friendly=True, peer_name="")
             ts = int(m.get("serverTime") or m.get("sendDttm") or 0)
             out["messages"].append({
                 "msgId": str(m.get("msgId") or m.get("cliMsgId") or ""),
+                "cliMsgId": str(m.get("cliMsgId") or ""),
                 "time": _fmt_time(ts),
                 "sender": _sender_name(m, me_uid, peer_name),
                 "msgType": m.get("msgType"),

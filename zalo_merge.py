@@ -96,6 +96,7 @@ def load_source(path):
             continue
         out.append({
             "msgId": str(r.get("msgId") or ""),
+            "cliMsgId": str(r.get("cliMsgId") or ""),
             "ts": _ts_of(r),
             "type": _type_of(r),
             "sender": r.get("sender") or r.get("dName") or "",
@@ -123,6 +124,29 @@ def merge_sources(list_of_rows, progress=None):
     allrows = []
     for rows in list_of_rows:
         allrows.extend(rows)
+    # Same-device copies within ONE file: the store returns a sent/synced message
+    # twice (PC src=10 + phone-sync src=7) sharing cliMsgId with different msgIds.
+    # Merge those first so cross-file matching never sees them as two messages.
+    by_cli = {}
+    for i, r in enumerate(allrows):
+        if r.get("cliMsgId"):
+            by_cli.setdefault(r["cliMsgId"], []).append(i)
+    drop = set()
+    for idxs in by_cli.values():
+        if len(idxs) < 2:
+            continue
+        keep = idxs[0]
+        for j in idxs[1:]:
+            a, b = allrows[keep], allrows[j]
+            b_better = (bool(b["raw"]) and not bool(a["raw"])) or \
+                       (bool(b["raw"]) == bool(a["raw"]) and b["ts"] >= a["ts"])
+            if b_better:
+                drop.add(keep)
+                keep = j
+            else:
+                drop.add(j)
+    if drop:
+        allrows = [r for i, r in enumerate(allrows) if i not in drop]
     allrows.sort(key=lambda r: (r["ts"], r["type"], _norm_text(r["text"])))
 
     WINDOW_TEXT = 2000    # ms — same text from the other account lands ~1 s apart
@@ -321,6 +345,75 @@ def empty_master(name, uid=""):
             "updatedAt": _now_str(), "snapshots": [], "count": 0, "messages": []}
 
 
+def _heal_device_copies(msgs):
+    """Collapse in-file device copies inside an EXISTING master (masters created
+    before cliMsgId dedup kept both the PC copy and the phone-sync copy of the
+    same message). Matching, in order of confidence:
+      * rows whose raw (or top-level) cliMsgId matches — exact;
+      * cli-less rows joined into a cli-group with equal sender+text within 2 s;
+      * cli-less pairs (legacy friendly masters): equal sender+text inside the
+        same wall-clock second.
+    The LATER row wins (that is the copy Zalo displays); msgId/cliMsgId/raw are
+    merged onto the kept row. Runs before every fold, so old masters self-heal
+    on the next crawl/merge. Returns number of dropped rows."""
+    def cli_of(m):
+        return str((m.get("raw") or {}).get("cliMsgId") or m.get("cliMsgId") or "")
+
+    def key2(m):
+        return (str(m.get("sender") or ""), _norm_text(m.get("text")))
+
+    groups, loose = {}, {}
+    for m in msgs:
+        c = cli_of(m)
+        if c:
+            groups.setdefault("c" + c, []).append(m)
+        else:
+            loose.setdefault(key2(m), []).append(m)
+
+    # cli-groups indexed by (sender, text) so legacy cli-less copies can join
+    gindex = {}
+    for g in groups.values():
+        gindex.setdefault(key2(g[0]), []).append(g)
+
+    sec_groups, rest = {}, []
+    for rows in loose.values():
+        for m in rows:
+            ts = m.get("_ts")
+            joined = False
+            if ts:
+                for g in gindex.get(key2(m), ()):
+                    gts = g[0].get("_ts")
+                    if gts and abs(int(gts) - int(ts)) <= 2000:
+                        g.append(m)
+                        joined = True
+                        break
+            if not joined:
+                if ts:
+                    sec_groups.setdefault((key2(m)[0], key2(m)[1],
+                                           int(ts) // 1000), []).append(m)
+                else:
+                    rest.append(m)
+
+    drop = set()
+    for members in list(groups.values()) + list(sec_groups.values()):
+        if len(members) < 2:
+            continue
+        members.sort(key=lambda m: (str(m.get("time") or ""), str(m.get("msgId") or "")))
+        keep = members[-1]                      # later copy = what Zalo displays
+        for m in members[:-1]:
+            drop.add(id(m))
+            if keep.get("raw") is None and m.get("raw") is not None:
+                keep["raw"] = m["raw"]
+                keep["sender"] = m.get("sender") or keep.get("sender")
+            if not keep.get("msgId") and m.get("msgId"):
+                keep["msgId"] = m["msgId"]
+            if not keep.get("cliMsgId") and m.get("cliMsgId"):
+                keep["cliMsgId"] = m["cliMsgId"]
+    if drop:
+        msgs[:] = [m for m in msgs if id(m) not in drop]
+    return len(drop)
+
+
 def _fmt_ts(ts):
     try:
         return datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M:%S")
@@ -360,7 +453,9 @@ def fold_snapshot(master, rows, crawled_at=None, complete=True):
     Returns (n_new, n_updated, n_marked_missing)."""
     crawled_at = crawled_at or _now_str()
     msgs = master.setdefault("messages", [])
+    _heal_device_copies(msgs)                 # collapse pre-fix duplicates
     by_id = {m["msgId"]: m for m in msgs if m.get("msgId")}
+    by_cli = {m["cliMsgId"]: m for m in msgs if m.get("cliMsgId")}
     # per-type ts-sorted index over ALL master rows (any row can fuzzy-match a
     # msgId-less snapshot row — e.g. the same message seen from another account)
     fuzzy = {}
@@ -375,6 +470,8 @@ def fold_snapshot(master, rows, crawled_at=None, complete=True):
     for r in sorted(rows, key=lambda x: x["ts"]):
         max_ts = max(max_ts, r["ts"])
         m = by_id.get(r["msgId"]) if r["msgId"] else None
+        if m is None and r.get("cliMsgId"):
+            m = by_cli.get(r["cliMsgId"])     # device copies share cliMsgId
         if m is None:
             win = WINDOW_TEXT if r["type"] == "1" else WINDOW_OTHER
             lst = fuzzy.setdefault(r["type"], [])
@@ -395,7 +492,8 @@ def fold_snapshot(master, rows, crawled_at=None, complete=True):
                 i += 1
             m = best[1] if best else None
         if m is None:  # brand new — first time this message was ever seen
-            m = {"msgId": r["msgId"], "msgType": r["type"], "_ts": r["ts"],
+            m = {"msgId": r["msgId"], "cliMsgId": r.get("cliMsgId") or "",
+                 "msgType": r["type"], "_ts": r["ts"],
                  "time": _fmt_ts(r["ts"]), "sender": r["sender"] or "",
                  "text": r["text"], "raw": r["raw"],
                  "firstSeen": crawled_at, "lastSeen": crawled_at, "missingSince": None}
@@ -403,6 +501,8 @@ def fold_snapshot(master, rows, crawled_at=None, complete=True):
             n_new += 1
             if m["msgId"]:
                 by_id[m["msgId"]] = m
+            if m["cliMsgId"]:
+                by_cli[m["cliMsgId"]] = m
             fuzzy.setdefault(m["msgType"], []).append([m["_ts"], m])
             fuzzy[m["msgType"]].sort(key=lambda p: p[0])
         else:
@@ -412,6 +512,9 @@ def fold_snapshot(master, rows, crawled_at=None, complete=True):
             if r["msgId"] and not m.get("msgId"):
                 m["msgId"] = r["msgId"]       # backfill id onto a legacy row
                 by_id[m["msgId"]] = m
+            if r.get("cliMsgId") and not m.get("cliMsgId"):
+                m["cliMsgId"] = r["cliMsgId"]  # backfill cliMsgId onto a legacy row
+                by_cli[m["cliMsgId"]] = m
             if r["raw"] and not m.get("raw"):  # upgrade to the rawer copy
                 m["raw"], m["sender"] = r["raw"], r["sender"] or m["sender"]
 

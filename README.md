@@ -42,6 +42,11 @@ offline — no Zalo server, no cloud, no plaintext credentials ever leave your m
 5. Repeat for other conversations. When you're done, hit **🔗 Gộp bản trùng lặp** to merge any
    conversations that were exported from more than one account into one master file.
 
+> Messages you send from your phone are stored twice by Zalo PC (a PC copy and a
+> phone-sync copy with a different `msgId` but the same `cliMsgId`). The tool
+> collapses those device copies automatically — exports, masters and the viewer
+> show each message exactly once, like the real Zalo app.
+
 **From source (developers)**
 
 ```bash
