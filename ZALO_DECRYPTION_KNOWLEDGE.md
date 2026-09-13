@@ -547,3 +547,15 @@ Tách thành project RIÊNG (repo InstagramBackup), cùng pipeline master/merge/
   `_media_url_chain` đọc `_ig_url`, port 8330, khối DYI import giữ nguyên.
 - Lưu ý webui viewer tab "Dạng Zalo" và mọi nhãn khác vẫn nói "Zalo" ở vài chuỗi ít xuất hiện
   (không gây nhầm lẫn chức năng).
+
+### Captcha khi đăng nhập trong Chrome debug (đã giải quyết 13/09/2026)
+
+Instagram hiện captcha lặp vô hạn khi đăng nhập trong Chrome có
+`--remote-debugging-port` (cờ automation). Quy trình đúng, đã build thành nút
+**🔑 Đăng nhập Instagram** (`/api/login` → `launch_chrome_login`):
+1. Đóng mọi Chrome đang dùng profile `chrome-profile` của tool (PowerShell filter
+   CommandLine — KHÔNG đụng Chrome cá nhân của người dùng).
+2. Mở Chrome THƯỜNG (không cờ debug) cùng user-data-dir đó → đăng nhập không captcha,
+   session cookies persist trong profile.
+3. Đóng cửa sổ → bấm "Mở Chrome (debug mode)": CDP 9222 bật lên với session sẵn có,
+   crawl không cần đăng nhập lại. Không bao giờ đăng nhập trong cửa sổ debug.
