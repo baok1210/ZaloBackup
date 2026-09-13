@@ -533,13 +533,18 @@ def _friendly(m, peer_name=""):
         return v
     if not isinstance(v, dict):
         return ""
-    if t in ("2", "18"):
+    if t in ("2", "18", "3", "5", "6", "17", "52"):
         try:
             pm = json.loads(v.get("params") or "{}")
-            return ZMERGE.pretty_media_text(t, params=pm)
+            if not isinstance(pm, dict):
+                pm = {}
+            return ZMERGE.pretty_media_text(t, params=pm, payload=v)
         except Exception:
             pass
-        return ("[Ảnh] " if t == "2" else "[Video] ") + (v.get("oriUrl") or v.get("normalUrl") or "")
+        if t == "2":
+            return "[Ảnh] " + (v.get("oriUrl") or v.get("normalUrl") or "")
+        if t == "18":
+            return "[Video] " + (v.get("oriUrl") or v.get("normalUrl") or "")
     if t == "19":
         return "[File] " + str(v.get("title") or "") + " " + str(v.get("href") or "")
     if t == "6":

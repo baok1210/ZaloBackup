@@ -395,3 +395,17 @@ verified: 0 JSON rows out of 108,094.
   readable `[🎙️ Tin nhắn thoại 12s]` text.
 - Playback verified in browser: readyState 4, correct duration, no MediaError;
   works in both Messages and Zalo-style tabs (12 players rendered per chunk).
+
+## Type-6 "recommended" messages = call logs, links, contacts (2026-09-13)
+
+`msgType=6` looked like links ("[Link] 13 phút 28 giây") but is 4 different things,
+split by `message.action`:
+- `recommened.misscall` (1,102 rows) → `[📞 Cuộc gọi nhỡ]` / `[📹 Cuộc gọi video nhỡ]`
+  (`params.calltype`: 0=voice, 1=video; the "0 phút 0 giây" title is ignored).
+- `recommened.calltime` (1,055) → `[📞 Cuộc gọi thoại 13 phút 28 giây]` /
+  `[📹 Cuộc gọi video …]` from `params.duration` (seconds).
+- `recommened.link` (379) → stays `[Link] <title>` (real shared links).
+- `recommened.user` (67) → `[👤 <title>]` (shared contact cards, desc holds phone).
+Also: many legacy call rows carried `title="sendBubbleMessage"` or `href=""`.
+Self-heal rewrites `[Link] …` rows on every fold via raw payload. Exports
+(JSON/TXT/CSV `_friendly`) share the same rendering through `pretty_media_text`.

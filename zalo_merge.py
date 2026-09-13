@@ -69,7 +69,7 @@ def _text_of(row):
     if t == "1":                          # rich-text: real text lives in title
         if isinstance(v, dict) and v.get("action") == "rtf" and v.get("title"):
             return str(v["title"])
-    if t in ("3", "5", "17", "52"):
+    if t in ("3", "5", "17", "52", "6"):
         try:
             pv = v.get("params") if isinstance(v, dict) else None
             pd = json.loads(pv) if isinstance(pv, str) and pv.startswith("{") else {}
@@ -205,6 +205,22 @@ def merge_sources(list_of_rows, progress=None):
     return out
 
 
+def _fmt_call_dur(sec):
+    try:
+        sec = int(sec or 0)
+    except Exception:
+        sec = 0
+    if sec <= 0:
+        return "0 giây"
+    m, s = divmod(sec, 60)
+    h, m = divmod(m, 60)
+    parts = []
+    if h: parts.append(f"{h} giờ")
+    if m: parts.append(f"{m} phút")
+    if s or not parts: parts.append(f"{s} giây")
+    return " ".join(parts)
+
+
 def pretty_media_text(mt, txt=None, params=None, payload=None):
     """Human-readable one-liner for photo/video/sticker/voice/doodle/location payloads.
     Accepts the raw JSON text (txt), an already-parsed params dict, and/or the full
@@ -248,6 +264,22 @@ def pretty_media_text(mt, txt=None, params=None, payload=None):
         cm = (p.get("customMsg") or {}).get("msg") or {}
         label = str(cm.get("vi") or cm.get("en") or "Web").strip()
         return f"🧩 {label}"
+    if t == "6":
+        pl2 = pl or jouter
+        act = str(pl2.get("action") or "")
+        if act == "recommened.misscall":
+            return "[📹 Cuộc gọi video nhỡ]" if str(p.get("calltype")) == "1" \
+                else "[📞 Cuộc gọi nhỡ]"
+        if act == "recommened.calltime":
+            vid = str(p.get("calltype")) == "1"
+            icon = "📹 Cuộc gọi video" if vid else "📞 Cuộc gọi thoại"
+            return f"[{icon} {_fmt_call_dur(p.get('duration'))}]"
+        if act == "recommened.user":
+            who = str(pl2.get("title") or "").strip() or "Danh thiếp"
+            return f"[👤 {who}]"
+        # recommened.link and anything else: [Link] <title>
+        ttl = str(pl2.get("title") or "").strip()
+        return f"[Link] {ttl}" if ttl else (txt or "[Link]")
     if t == "2":
         w, h = p.get("width"), p.get("height")
         dim = f" {w}×{h}" if w and h else ""
@@ -495,10 +527,17 @@ def fold_snapshot(master, rows, crawled_at=None, complete=True):
     _heal_device_copies(msgs)                 # collapse pre-fix duplicates
     for m in msgs:                            # self-heal legacy JSON-dump payloads
         t = str(m.get("msgType"))
-        if t in ("1", "3", "4", "5", "7", "17", "52") and \
-                str(m.get("text") or "").lstrip().startswith("{"):
-            if isinstance(m.get("raw"), dict):
-                m["text"] = _text_of(m["raw"])   # voice/doodle/location/sticker/webcontent
+        raw = m.get("raw") if isinstance(m.get("raw"), dict) else None
+        txt0 = str(m.get("text") or "")
+        if t == "6" and txt0.startswith("[Link] ") and isinstance(raw, dict):
+            act = str((raw.get("message") or {}).get("action") or "") \
+                if isinstance(raw.get("message"), dict) else ""
+            if act in ("recommened.calltime", "recommened.misscall", "recommened.user"):
+                m["text"] = _text_of(raw)    # call logs / contact cards, not links
+            continue
+        if t in ("1", "3", "4", "5", "7", "17", "52") and txt0.lstrip().startswith("{"):
+            if raw is not None:
+                m["text"] = _text_of(raw)   # voice/doodle/location/sticker/webcontent
             else:
                 m["text"] = "[Sticker]"          # legacy friendly row: stickers only
     by_id = {m["msgId"]: m for m in msgs if m.get("msgId")}
