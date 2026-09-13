@@ -437,3 +437,18 @@ Two fixes make the pipeline self-identifying:
 Viewer: ME-guess prefers the sender not named like any master conversation;
 guess key bumped to `zme2_<uid>` so stale wrong guesses are discarded once.
 Verified: Mẹ Bun auto-guess = Đoàn Bảo, 215 own bubbles, persisted.
+
+## Smoke test (`smoke_test.mjs`, 2026-09-13)
+
+Playwright script opening every master in the live viewer and asserting:
+1. **no-json-dumps** — zero rows whose text starts with `{`;
+2. **no-missing-senders** — zero empty/'?' senders;
+3. **sender-count-sane** — ≤4 distinct senders (1-1/self chats);
+4. **one-me-sender + me-guess-matches-bubbles** — Zalo-style "me" side consistent
+   with the auto-guess;
+5. **voice-plays / sticker-renders** — flagged rows actually render inline media
+   that loads (audio readyState>0, image naturalWidth>0).
+First run caught 5,382 leftover JSON rows in the Bảo/Blue Roses masters (legacy
+photo/video/URL payloads that predate the self-heal rules) — healed via
+pretty_media_text; all masters now pass.
+Run: `npm run smoke` (server must be running on :8320).

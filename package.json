@@ -1,0 +1,26 @@
+{
+  "name": "zalobackup",
+  "version": "1.0.0",
+  "description": "Zalo message backup + viewer (smoke tests included)",
+  "main": "background.js",
+  "scripts": {
+    "smoke": "node smoke_test.mjs",
+    "smoke:alt": "node smoke_test.mjs --url http://localhost:8321"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/baok1210/ZaloBackup.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/baok1210/ZaloBackup/issues"
+  },
+  "homepage": "https://github.com/baok1210/ZaloBackup#readme",
+  "dependencies": {
+    "playwright": "^1.63.0"
+  },
+  "private": true
+}
