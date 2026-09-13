@@ -65,10 +65,19 @@ def _text_of(row):
         if isinstance(row.get("text"), str):
             return row["text"]
         return ""
-    if _type_of(row) == "7":
+    t = _type_of(row)
+    if t == "1":                          # rich-text: real text lives in title
+        if isinstance(v, dict) and v.get("action") == "rtf" and v.get("title"):
+            return str(v["title"])
+    if t in ("3", "5", "17", "52"):
+        try:
+            pv = v.get("params") if isinstance(v, dict) else None
+            pd = json.loads(pv) if isinstance(pv, str) and pv.startswith("{") else {}
+            return pretty_media_text(t, params=pd if isinstance(pd, dict) else {}, payload=v)
+        except Exception:
+            pass
+    if t in ("7", "4"):
         return "[Sticker]"          # sticker payload dict — don't dump raw JSON
-    if _type_of(row) == "4":
-        return "[Sticker]"          # catalog sticker (catId/id payload)
     return json.dumps(v, ensure_ascii=False, sort_keys=True)
 
 
@@ -196,10 +205,14 @@ def merge_sources(list_of_rows, progress=None):
     return out
 
 
-def pretty_media_text(mt, txt=None, params=None):
-    """Human-readable one-liner for photo/video JSON payloads.
-    Accepts either the raw JSON text (txt) or an already-parsed params dict."""
+def pretty_media_text(mt, txt=None, params=None, payload=None):
+    """Human-readable one-liner for photo/video/sticker/voice/doodle/location payloads.
+    Accepts the raw JSON text (txt), an already-parsed params dict, and/or the full
+    message payload dict (needed for type 17 desc)."""
     t = str(mt or "")
+    jouter = {}
+    if params is None and not txt:
+        params = {}                      # payload-only call (e.g. type 17 desc)
     if params is None:
         if not txt or not str(txt).lstrip().startswith("{"):
             return txt
@@ -207,14 +220,34 @@ def pretty_media_text(mt, txt=None, params=None):
             j = json.loads(txt)
             if not isinstance(j, dict):
                 return txt
+            jouter = j
             params = json.loads(j.get("params") or "{}")
             if not isinstance(params, dict):
                 params = {}
         except Exception:
             return txt
     p = params or {}
+    pl = payload if isinstance(payload, dict) else {}
     if t in ("7", "4"):
         return "[Sticker]"
+    if t == "3":
+        try:
+            dur = int(p.get("duration") or 0)
+        except Exception:
+            dur = 0
+        ds = f" {round(dur / 1000)}s" if dur else ""
+        return f"[🎙️ Tin nhắn thoại{ds}]"
+    if t == "5":
+        w, h = p.get("width"), p.get("height")
+        dim = f" {w}×{h}" if w and h else ""
+        return f"[🖼️ Doodle{dim}]"
+    if t == "17":
+        desc = str(pl.get("desc") or jouter.get("desc") or "").strip() or "Vị trí"
+        return f"📍 {desc}"
+    if t == "52":
+        cm = (p.get("customMsg") or {}).get("msg") or {}
+        label = str(cm.get("vi") or cm.get("en") or "Web").strip()
+        return f"🧩 {label}"
     if t == "2":
         w, h = p.get("width"), p.get("height")
         dim = f" {w}×{h}" if w and h else ""
@@ -249,7 +282,7 @@ def _friendly_row(r, peer_name=""):
     except Exception:
         t = ""
     txt = r["text"]
-    if r["type"] in ("2", "18", "7", "4"):
+    if r["type"] in ("2", "18", "7", "4", "3", "5", "17", "52"):
         txt = pretty_media_text(r["type"], txt)
     return {"time": t, "sender": r["sender"] or ("Tôi" if r["raw"] and
             str(r["raw"].get("fromUid")) == "0" else peer_name or "?"),
@@ -460,10 +493,14 @@ def fold_snapshot(master, rows, crawled_at=None, complete=True):
     crawled_at = crawled_at or _now_str()
     msgs = master.setdefault("messages", [])
     _heal_device_copies(msgs)                 # collapse pre-fix duplicates
-    for m in msgs:                            # self-heal legacy sticker JSON dumps
-        if str(m.get("msgType")) in ("4", "7") and \
+    for m in msgs:                            # self-heal legacy JSON-dump payloads
+        t = str(m.get("msgType"))
+        if t in ("1", "3", "4", "5", "7", "17", "52") and \
                 str(m.get("text") or "").lstrip().startswith("{"):
-            m["text"] = "[Sticker]"
+            if isinstance(m.get("raw"), dict):
+                m["text"] = _text_of(m["raw"])   # voice/doodle/location/sticker/webcontent
+            else:
+                m["text"] = "[Sticker]"          # legacy friendly row: stickers only
     by_id = {m["msgId"]: m for m in msgs if m.get("msgId")}
     by_cli = {m["cliMsgId"]: m for m in msgs if m.get("cliMsgId")}
     # per-type ts-sorted index over ALL master rows (any row can fuzzy-match a

@@ -362,3 +362,19 @@ exports / master MD / viewer, and msgType-tagged media payloads for the correct 
   (bisect insert) — folding 108k rows takes ~0.7s; the previous re-sort-per-row was
   O(n²) and hung >7 min on the 108k "Mẹ Bun" conversation (would have hit the daily
   auto-crawl on big chats).
+
+## Non-photo JSON payloads made human-readable (2026-09-13, part 2)
+
+Beyond stickers, four more payload types used to dump raw JSON into masters:
+- `msgType=3` voice messages: `params.{m4a, duration}` on `voice-aac-dl.zdn.vn`
+  → `[🎙️ Tin nhắn thoại 12s]` (384 rows in "Mẹ Bun"; 99 lack duration).
+- `msgType=5` doodles (`chat.doodle`): `params.{width,height}`, `oriUrl` png
+  → `[🖼️ Doodle 815×1280]` (8 rows).
+- `msgType=17` location shares (`chat.location.new`): `message.desc` already reads
+  "Tọa độ (lat, lng)" → `📍 Tọa độ (…)` (1 row).
+- `msgType=52` embedded web content (`chat.webcontent`, e.g. bank-account cards):
+  label in `params.customMsg.msg.vi/en` → `🧩 Tài khoản ngân hàng` (4 rows).
+- `msgType=1` with `action:"rtf"`: rich text; the real text is in `message.title`.
+`fold_snapshot` self-heals all of these on every fold (raw rows re-derive text via
+`_text_of`; legacy friendly rows fall back to `[Sticker]` for 4/7). Master "Mẹ Bun"
+verified: 0 JSON rows out of 108,094.
