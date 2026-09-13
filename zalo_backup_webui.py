@@ -1488,8 +1488,8 @@ a{color:var(--acc)}
 #bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line);background:#0c1322}
 #bar input[type=date],#bar input[type=text]{background:var(--panel);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 8px;font-size:13px}
 #bar input[type=text]{width:220px}
-.chip{background:var(--panel);border:1px solid var(--line);color:var(--dim);border-radius:20px;padding:5px 12px;cursor:pointer;font-size:12px}
-.chip.on,.chip:hover{color:var(--tx);border-color:var(--acc)}
+.chip,.nbtn{background:var(--panel);border:1px solid var(--line);color:var(--dim);border-radius:20px;padding:5px 12px;cursor:pointer;font-size:12px}
+.chip.on,.chip:hover,.nbtn:hover{color:var(--tx);border-color:var(--acc)}
 label.chk{color:var(--dim);font-size:12.5px;display:flex;align-items:center;gap:5px;cursor:pointer}
 #tabs{display:flex;gap:2px;padding:0 14px;border-bottom:1px solid var(--line);background:#0c1322}
 #tabs button{background:none;border:none;color:var(--dim);padding:10px 16px;cursor:pointer;font-size:14px;border-bottom:2px solid transparent}
@@ -1544,12 +1544,23 @@ label.chk{color:var(--dim);font-size:12.5px;display:flex;align-items:center;gap:
 #zlightbox{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;z-index:99;cursor:zoom-out}
 #zlightbox img{max-width:94vw;max-height:94vh}
 .zempty{color:var(--dim);text-align:center;padding:60px 20px}
+#scrim{display:none}
+#menuBtn{display:none}
+@media(max-width:820px){
+ #side{position:fixed;left:0;top:0;bottom:0;z-index:30;transform:translateX(-105%);transition:transform .18s;box-shadow:4px 0 18px rgba(0,0,0,.5)}
+ #side.open{transform:none}
+ #menuBtn{display:inline-block}
+ #scrim{display:block;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:25;opacity:0;pointer-events:none;transition:opacity .18s}
+ #scrim.show{opacity:1;pointer-events:auto}
+}
 @media print{body{background:#fff}#wrap{height:auto}#side,#bar,#tabs,.zbar .zback,#zlightbox{display:none!important}#content{overflow:visible;padding:0}.zscroll{max-width:760px}}
 </style></head><body>
 <div id="wrap">
- <div id="side"><h1>📖 Master Viewer</h1><div class="sub">Dữ liệu đọc từ exports\ — không cần Zalo đang chạy</div><div id="mlist"></div></div>
+ <div id="side"><h1>📖 Master Viewer</h1><div class="sub">Dữ liệu đọc từ exports\ — không cần Zalo đang chạy · <a href="/">← Trang backup</a></div><div id="mlist"></div></div>
  <div id="main">
   <div id="bar">
+   <button class="nbtn" id="backBtn" title="Về danh sách master để chọn hội thoại khác">← Danh sách</button>
+   <button class="nbtn" id="menuBtn" title="Danh sách master">☰ Master</button>
    <input type="date" id="d1"> <span style="color:var(--dim)">→</span> <input type="date" id="d2">
    <button class="chip on" data-r="all">Tất cả</button><button class="chip" data-r="7">7 ngày</button><button class="chip" data-r="30">30 ngày</button><button class="chip" data-r="90">90 ngày</button><button class="chip" data-r="y">Năm nay</button>
    <input type="text" id="q" placeholder="🔍 Tìm trong kết quả…">
@@ -1561,6 +1572,7 @@ label.chk{color:var(--dim);font-size:12.5px;display:flex;align-items:center;gap:
   <div id="content"></div>
  </div>
 </div>
+<div id="scrim"></div>
 <div id="zlightbox"><img alt=""></div>
 <script>
 /*! html2canvas 1.4.1 (MIT) https://html2canvas.hertzen.com - vendored for full-offline use */
@@ -1660,8 +1672,12 @@ async function init(){
   select(0);
 }
 
+$('backBtn').onclick=()=>{CUR=null;document.querySelectorAll('.mcard').forEach(c=>c.classList.remove('sel'));$('mstat').innerHTML='';$('statchip').innerHTML='';$('content').innerHTML='<div class="empty">← Chọn một master ở danh sách bên trái để xem tin nhắn &amp; media.</div>';};
+$('menuBtn').onclick=()=>{$('side').classList.toggle('open');$('scrim').classList.toggle('show',$('side').classList.contains('open'))};
+$('scrim').onclick=()=>{$('side').classList.remove('open');$('scrim').classList.remove('show')};
 async function select(i){
   CUR=MASTERS[i];
+  $('side').classList.remove('open');$('scrim').classList.remove('show');
   document.querySelectorAll('.mcard').forEach((c,k)=>c.classList.toggle('sel',k===i));
   $('d1').value='';$('d2').value='';$('q').value='';$('or').checked=false;document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',c.dataset.r==='all'));
   await load();

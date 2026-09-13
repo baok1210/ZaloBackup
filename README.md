@@ -126,6 +126,7 @@ The Viewer reads the exported JSON/Media folder directly — no CDP, no Zalo run
 
 ### Master Viewer (`/viewer`)
 - Lists every `master_*.json` from the exports folder.
+- **← Danh sách** button returns to the master list from any view (plus a ☰ drawer on narrow windows), and a link back to the backup page.
 - Messages: grouped by day, date-range presets + custom from/to, text search, "only recalled" filter.
 - Per-message tooltip shows msgId / firstSeen / lastSeen for forensics.
 - Non-text messages are prettified (photo dims + CDN host, file/link title instead of raw JSON).
