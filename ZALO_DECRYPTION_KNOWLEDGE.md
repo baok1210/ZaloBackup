@@ -292,3 +292,16 @@ click **Restart Zalo (debug mode)** in the WebUI (or the taskkill/start command 
 — Last updated 2026-09-13, after Zalo-style chat mode + offline PNG screenshot export + video
 inline rendering (`msgType 18`), pretty media one-liners (`zalo_merge.pretty_media_text`) shared by
 exports / master MD / viewer, and msgType-tagged media payloads for the correct renderer per file.
+
+## Media stats audit (`/api/mediastats`)
+
+- Classifies every photo/video message in a master: **saved** (file in media master), **alive**
+  (CDN link still downloadable — GET `Range: bytes=0-1` with the ZaloPC UA), **dead** (= lost
+  forever), **unknown** (not probed yet). `saved + alive + dead + unknown = mediaMsgs` always.
+- Probing runs in a **background daemon thread** (12 parallel workers, ~1,600 links/min), writes
+  the cache atomically every 40 probes to `master_<name>_<uid>.json.mediastats`, and the API
+  returns immediately (`auditing: true`, `auditDone/auditTotal` progress). The viewer polls it
+  every 1.5 s while auditing. A dead link is only ever counted after an actual probe — never
+  guessed from age.
+- One link per message is probed (the first of oriUrl/normalUrl/hdUrl/thumbUrl/hd); messages
+  already saved locally are never probed. Cache survives server restarts.

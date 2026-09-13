@@ -141,6 +141,12 @@ The Viewer reads the exported JSON/Media folder directly — no CDP, no Zalo run
   streaming); messages whose CDN link has expired render as a readable one-liner instead of raw
   JSON: `[Video 2s · 417 KB (album 10/12)]`, `[Ảnh 896×2030]`. Photo/video payloads are prettified
   the same way in master `.md` files, friendly JSON/CSV/TXT exports, and the viewer.
+- **Media stats bar** (top of the master view) audits every photo/video message and shows how much
+  is 💾 saved locally, 🔗 still downloadable (live CDN link), 💀 lost forever (no local file + dead
+  link), and ❔ not yet checked. Link probing runs in a background thread (~1,600 links/min, 12
+  parallel), results are cached next to the master JSON (`master_*.json.mediastats`), and the bar
+  updates live while the audit runs. Zalo PC does not need to be open — the probe goes straight to
+  the CDN URLs stored in the master.
 
 ### Account model awareness
 - The tool understands that Zalo gives each account a *different* msgId for the same message,

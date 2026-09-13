@@ -1022,6 +1022,7 @@ VIEWER_MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
                ".webp": "image/webp", ".gif": "image/gif", ".mp4": "video/mp4",
                ".webm": "video/webm", ".mov": "video/quicktime"}
 _M_CACHE = {}  # path -> (mtime, size, parsed dict)
+_AUDIT_STATE = {}  # uid -> {running, done, total} for background media-link audit
 
 
 def _viewer_load_master(fp):
@@ -1138,13 +1139,9 @@ def _viewer_master_path(uid):
     return None
 
 
-def _viewer_api_master(uid, d1, d2):
-    fp = _viewer_master_path(uid)
-    if not fp:
-        return {"error": "master not found for uid " + str(uid)}
-    d = _viewer_load_master(fp)
-    msgs = d.get("messages") or []
-    # map photo/video send-times -> media-master files (for inline display in Zalo mode)
+def _viewer_media_map(msgs, uid):
+    """Assign media-master files to photo/video messages by msgType + send-time.
+    One shared implementation for the viewer payload and the media audit."""
     photo_list = []  # (epoch_seconds, rel, msgType)
     md = _viewer_media_dir_for(uid)
     if md:
@@ -1202,6 +1199,169 @@ def _viewer_api_master(uid, d1, d2):
             except Exception:
                 rel = None
         assign.append(rel)
+    return assign
+
+
+def _viewer_media_stats(uid, max_probe=80):
+    """Audit every photo/video message in the master:
+      saved      -> file exists in media master (independent of any CDN link)
+      linkAlive  -> CDN link still downloadable (probed in a background thread)
+      linkDead   -> probed but gone
+      unknown    -> not probed yet (audit still running or not started)
+    lost = linkDead (no local file AND dead link -> unrecoverable).
+    Results cached next to the master JSON; key = first CDN URL of the message."""
+    fp = _viewer_master_path(uid)
+    if not fp:
+        return None
+    try:
+        d = _viewer_load_master(fp)
+    except Exception:
+        return None
+    msgs = d.get("messages") or []
+    mmsgs = [m for m in msgs if str(m.get("msgType") or "") in ("2", "18")]
+    assign = _viewer_media_map(mmsgs, uid)
+    saved = sum(1 for r in assign if r)
+    # link probe: URL per message from stored raw payload
+    import calendar as _cal
+    def _urls_of(m):
+        raw = m.get("text") or ""
+        if not raw.lstrip().startswith("{"):
+            return []
+        try:
+            j = json.loads(raw)
+        except Exception:
+            return []
+        out = []
+        for k in ("oriUrl", "normalUrl", "hdUrl", "thumbUrl", "href"):
+            u = j.get(k)
+            if isinstance(u, str) and u.startswith("http") and u not in out:
+                out.append(u)
+        try:
+            pj = json.loads(j.get("params") or "{}")
+            u = pj.get("hd")
+            if isinstance(u, str) and u.startswith("http") and u not in out:
+                out.append(u)
+        except Exception:
+            pass
+        return out
+    cache = {}
+    try:
+        cache = json.load(open(fp + ".mediastats", encoding="utf-8"))
+    except Exception:
+        pass
+    import urllib.error
+    def _probe(url):
+        try:
+            req = urllib.request.Request(url, headers=UA_HDRS)
+            req.add_header("Range", "bytes=0-1")
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return 200 <= getattr(r, "status", 200) < 400
+        except urllib.error.HTTPError as e:
+            # some CDNs reject Range but still serve the file
+            if e.code in (403, 404, 410):
+                return False
+            return e.code < 500
+        except Exception:
+            return False
+    # background audit: probe every not-yet-cached link, 12 workers, atomic cache writes
+    todo = []
+    for m, rel in zip(mmsgs, assign):
+        if rel:
+            continue
+        urls = _urls_of(m)
+        if urls and urls[0] not in cache and urls[0] not in todo:
+            todo.append(urls[0])
+    st = _AUDIT_STATE.setdefault(uid, {"running": False})
+    if todo and not st.get("running"):
+        st["running"] = True
+        st["total"] = len(todo)
+        st["done"] = 0
+        def _audit():
+            done = 0
+            try:
+                with ThreadPoolExecutor(max_workers=12) as ex:
+                    for url, ok in zip(todo, ex.map(_probe, todo)):
+                        cache[url] = {"alive": bool(ok),
+                                      "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+                        done += 1
+                        if done % 40 == 0 or done == len(todo):
+                            st["done"] = done
+                            tmp = fp + ".mediastats.tmp"
+                            try:
+                                with open(tmp, "w", encoding="utf-8") as f:
+                                    json.dump(cache, f)
+                                os.replace(tmp, fp + ".mediastats")
+                            except Exception:
+                                pass
+            finally:
+                st["running"] = False
+                try:
+                    with open(fp + ".mediastats", "w", encoding="utf-8") as f:
+                        json.dump(cache, f)
+                except Exception:
+                    pass
+        threading.Thread(target=_audit, daemon=True, name="media-audit-" + str(uid)).start()
+    n_saved = n_alive = n_dead = n_unknown = 0
+    for m, rel in zip(mmsgs, assign):
+        if rel:
+            n_saved += 1
+            continue
+        urls = _urls_of(m)
+        if not urls:
+            n_unknown += 1
+            continue
+        ent = cache.get(urls[0])
+        if ent is None:
+            n_unknown += 1
+        elif ent.get("alive"):
+            n_alive += 1
+        else:
+            n_dead += 1
+    return {"mediaMsgs": len(mmsgs), "photos": sum(1 for m in mmsgs
+                if str(m.get("msgType")) == "2"),
+            "videos": sum(1 for m in mmsgs if str(m.get("msgType")) == "18"),
+            "saved": n_saved, "linkAlive": n_alive, "linkDead": n_dead,
+            "unknown": n_unknown, "linkProbed": len(cache),
+            "auditing": bool(st.get("running")),
+            "auditDone": st.get("done", 0), "auditTotal": st.get("total", 0),
+            "lost": n_dead}
+
+
+def _viewer_api_master(uid, d1, d2):
+    fp = _viewer_master_path(uid)
+    if not fp:
+        return {"error": "master not found for uid " + str(uid)}
+    d = _viewer_load_master(fp)
+    msgs = d.get("messages") or []
+    # map photo/video send-times -> media-master files (for inline display in Zalo mode)
+    photo_list = []  # (epoch_seconds, rel, msgType)
+    md = _viewer_media_dir_for(uid)
+    if md:
+        try:
+            idx = json.load(open(os.path.join(md, "index.json"), encoding="utf-8"))
+            for v in (idx.get("files") or {}).values():
+                rel = v.get("file") or ""
+                if rel.startswith("photos/"):
+                    mt = "2"
+                elif rel.startswith("videos/"):
+                    mt = "18"
+                else:
+                    mt = None
+                if not mt:
+                    continue
+                sa = v.get("sentAt")
+                if not sa:
+                    continue
+                try:
+                    import calendar
+                    ep = calendar.timegm(tuple(sa[:6]) + (0, 0, -1))
+                    photo_list.append((ep, rel, mt))
+                except Exception:
+                    continue
+            photo_list.sort()
+        except Exception:
+            pass
+    assign = _viewer_media_map(msgs, uid)
     keys = ("time", "sender", "msgType", "text", "msgId", "firstSeen",
             "lastSeen", "missingSince", "copies", "sources")  # noqa: E501
     out = []
@@ -1218,7 +1378,8 @@ def _viewer_api_master(uid, d1, d2):
     # NOTE: media payload gets msgType per file so the UI can pick the right renderer
     return {"conversation": d.get("conversation"), "uid": str(d.get("uid") or ""),
             "masterFile": os.path.basename(fp), "total": len(msgs), "count": len(out),
-            "messages": out, "media": _viewer_media_info(uid, with_files=True)}
+            "messages": out, "media": _viewer_media_info(uid, with_files=True),
+            "mediaStats": _viewer_media_stats(uid)}
 
 
 def _viewer_mediafile(self, qs):
@@ -1349,6 +1510,11 @@ label.chk{color:var(--dim);font-size:12.5px;display:flex;align-items:center;gap:
 .zbubble .zrec{display:block;color:#d93025;font-size:10.5px;text-decoration:none}
 .zmsgimg{display:block;max-width:320px;max-height:320px;border-radius:8px;cursor:zoom-in}
 .zmsgvid{display:block;max-width:320px;max-height:320px;border-radius:8px;background:#000}
+#mstat{display:none;flex-wrap:wrap;gap:8px 14px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:10px 0;font-size:12.5px;color:var(--dim)}
+.ms-title{color:var(--tx);font-weight:600}
+.ms-seg b{color:var(--tx)}
+.ms-ok b{color:#4ade80}.ms-alive b{color:#38bdf8}.ms-dead b{color:#f87171}.ms-unk b{color:#fbbf24}
+.ms-audit{color:#fbbf24;font-style:italic}
 #zlightbox{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;z-index:99;cursor:zoom-out}
 #zlightbox img{max-width:94vw;max-height:94vh}
 .zempty{color:var(--dim);text-align:center;padding:60px 20px}
@@ -1364,6 +1530,7 @@ label.chk{color:var(--dim);font-size:12.5px;display:flex;align-items:center;gap:
    <label class="chk"><input type="checkbox" id="or"> Chỉ tin bị thu hồi</label>
    <span id="statchip"></span>
   </div>
+  <div id="mstat"></div>
   <div id="tabs"><button id="tmsg" class="on">💬 Tin nhắn</button><button id="tmed">🖼 Media</button><button id="tzalo">💬 Dạng Zalo</button><span style="flex:1"></span><button id="tcap">📷 Chụp màn hình (PNG)</button></div>
   <div id="content"></div>
  </div>
@@ -1396,6 +1563,7 @@ label.chk{color:var(--dim);font-size:12.5px;display:flex;align-items:center;gap:
 const $=id=>document.getElementById(id);
 let MASTERS=[],CUR=null,DATA=null,view='msg',shown=0,ME_GUESS=null,ME_OPTS='',ZBLOBS={};
 const jget=u=>fetch(u).then(r=>r.json());
+const jgetQ=u=>fetch(u).then(r=>r.ok?r.json():null).catch(()=>null);
 const esc=s=>(s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const TYPE_ICON={2:'🖼',3:'🎨',4:'📷',6:'📎',7:'📎',18:'📎',19:'🔗',22:'📎',24:'🔗',28:'🎙',31:'🎬',32:'🎙',37:'🎬'};
 function prettyText(m){
@@ -1424,6 +1592,34 @@ function prettyText(m){
   return raw;
 }
 function fmtB(n){if(n<1024)return n+' B';if(n<1048576)return (n/1024).toFixed(1)+' KB';if(n<1073741824)return (n/1048576).toFixed(1)+' MB';return (n/1073741824).toFixed(2)+' GB'}
+let MSTAT=null,MSTAT_POLL=null;
+function fmtPct(a,b){return b?Math.round(100*a/b)+'%':'—'}
+function renderMstat(s){
+  const box=document.getElementById('mstat');if(!box)return;
+  if(!s){box.style.display='none';return}
+  const total=s.mediaMsgs||0;
+  const seg=(n,cls,label)=>n?`<span class="ms-seg ${cls}">${label}: <b>${n.toLocaleString('vi-VN')}</b> (${fmtPct(n,total)})</span>`:'';
+  const audit=s.auditing?`<span class="ms-audit">⏳ đang kiểm tra link… ${Math.round(100*(s.auditDone||0)/(s.auditTotal||1))}%</span>`:'';
+  box.style.display='flex';
+  box.innerHTML=`<span class="ms-title">🖼 ${total.toLocaleString('vi-VN')} ảnh+video:</span>`
+    +seg(s.saved,'ms-ok','💾 đã lưu local')
+    +seg(s.linkAlive,'ms-alive','🔗 link sống')
+    +seg(s.linkDead,'ms-dead','💀 đã mất vĩnh viễn')
+    +(s.unknown?`<span class="ms-seg ms-unk">❔ chưa kiểm tra: <b>${s.unknown.toLocaleString('vi-VN')}</b> (${fmtPct(s.unknown,total)})</span>`:'')
+    +audit;
+}
+async function pollMstat(){
+  if(!CUR)return;
+  const s=await jgetQ('/api/mediastats?uid='+encodeURIComponent(CUR.uid));
+  if(s&&!s.error){MSTAT=s;renderMstat(s);}
+  if(MSTAT&&MSTAT.auditing){MSTAT_POLL=setTimeout(pollMstat,1500);}
+  else{MSTAT_POLL=null;}
+}
+function startMstat(){
+  if(MSTAT_POLL){clearTimeout(MSTAT_POLL);MSTAT_POLL=null;}
+  MSTAT=null;
+  pollMstat();
+}
 
 async function init(){
   const j=await jget('/api/masters'); MASTERS=j.masters||[];
@@ -1453,6 +1649,7 @@ function rangeFor(r){
 async function load(){
   if(!CUR)return;
   $('content').innerHTML='<div class="empty">Đang tải…</div>';
+  startMstat();
   const f=$('d1').value,t=$('d2').value;
   DATA=await jget(`/api/master?uid=${encodeURIComponent(CUR.uid)}&from=${f}&to=${t}`);
   if(DATA.error){$('content').innerHTML='<div class="empty">'+esc(DATA.error)+'</div>';return}
@@ -1642,6 +1839,12 @@ class Handler(BaseHTTPRequestHandler):
                 qs = parse_qs(urlparse(self.path).query)
                 self._json(_viewer_api_master(
                     qs.get("uid", [""])[0], qs.get("from", [""])[0], qs.get("to", [""])[0]))
+            except Exception as e:
+                self._json({"error": str(e)[:200]}, 500)
+        elif p == "/api/mediastats":
+            try:
+                qs = parse_qs(urlparse(self.path).query)
+                self._json(_viewer_media_stats(qs.get("uid", [""])[0]))
             except Exception as e:
                 self._json({"error": str(e)[:200]}, 500)
         elif p == "/api/mediafile":
