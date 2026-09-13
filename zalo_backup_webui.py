@@ -1488,6 +1488,9 @@ a{color:var(--acc)}
 #bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line);background:#0c1322}
 #bar input[type=date],#bar input[type=text]{background:var(--panel);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 8px;font-size:13px}
 #bar input[type=text]{width:220px}
+.crumb{font-weight:600;font-size:14px;color:var(--tx);cursor:pointer;white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis;user-select:none}
+.crumb:hover{color:var(--acc)}
+.crumb.empty{color:var(--dim);font-weight:400;cursor:default}
 .chip,.nbtn{background:var(--panel);border:1px solid var(--line);color:var(--dim);border-radius:20px;padding:5px 12px;cursor:pointer;font-size:12px}
 .chip.on,.chip:hover,.nbtn:hover{color:var(--tx);border-color:var(--acc)}
 label.chk{color:var(--dim);font-size:12.5px;display:flex;align-items:center;gap:5px;cursor:pointer}
@@ -1561,6 +1564,7 @@ label.chk{color:var(--dim);font-size:12.5px;display:flex;align-items:center;gap:
   <div id="bar">
    <button class="nbtn" id="backBtn" title="Về danh sách master để chọn hội thoại khác">← Danh sách</button>
    <button class="nbtn" id="menuBtn" title="Danh sách master">☰ Master</button>
+   <span id="crumb" class="crumb empty">Chưa chọn hội thoại</span>
    <input type="date" id="d1"> <span style="color:var(--dim)">→</span> <input type="date" id="d2">
    <button class="chip on" data-r="all">Tất cả</button><button class="chip" data-r="7">7 ngày</button><button class="chip" data-r="30">30 ngày</button><button class="chip" data-r="90">90 ngày</button><button class="chip" data-r="y">Năm nay</button>
    <input type="text" id="q" placeholder="🔍 Tìm trong kết quả…">
@@ -1674,11 +1678,13 @@ async function init(){
   select(li>=0?li:0);   // reopen the conversation you were reading (default: first)
 }
 
-$('backBtn').onclick=()=>{CUR=null;localStorage.removeItem('zlastmaster');document.querySelectorAll('.mcard').forEach(c=>c.classList.remove('sel'));$('mstat').innerHTML='';$('statchip').innerHTML='';$('content').innerHTML='<div class="empty">← Chọn một master ở danh sách bên trái để xem tin nhắn &amp; media.</div>';};
+$('backBtn').onclick=()=>{CUR=null;localStorage.removeItem('zlastmaster');document.querySelectorAll('.mcard').forEach(c=>c.classList.remove('sel'));$('mstat').innerHTML='';$('statchip').innerHTML='';const cr=$('crumb');cr.textContent='Chưa chọn hội thoại';cr.classList.add('empty');cr.title='';$('content').innerHTML='<div class="empty">← Chọn một master ở danh sách bên trái để xem tin nhắn &amp; media.</div>';};
+$('crumb').onclick=()=>{if(CUR)$('backBtn').onclick();};
 $('menuBtn').onclick=()=>{$('side').classList.toggle('open');$('scrim').classList.toggle('show',$('side').classList.contains('open'))};
 $('scrim').onclick=()=>{$('side').classList.remove('open');$('scrim').classList.remove('show')};
 async function select(i){
   CUR=MASTERS[i];
+  const cr=$('crumb');cr.textContent='📖 '+CUR.conversation;cr.classList.remove('empty');cr.title='Bấm để về danh sách master';
   $('side').classList.remove('open');$('scrim').classList.remove('show');
   document.querySelectorAll('.mcard').forEach((c,k)=>c.classList.toggle('sel',k===i));
   $('d1').value='';$('d2').value='';$('q').value='';$('or').checked=false;document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',c.dataset.r==='all'));
