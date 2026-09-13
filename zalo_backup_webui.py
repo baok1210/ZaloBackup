@@ -1430,6 +1430,9 @@ def _viewer_api_master(uid, d1, d2):
             rec["st"] = True   # sticker image servable via /api/stickerthumb
         elif str(m.get("msgType")) == "4" and _stk_cache_file(m):
             rec["st"] = True   # catalog sticker found in Zalo PC's local cache
+        if str(m.get("msgType")) == "3" and \
+                _voice_cache_index().get(str(m.get("msgId") or "")):
+            rec["vo"] = True   # voice audio available in Zalo PC's local cache
         out.append(rec)
     # NOTE: media payload gets msgType per file so the UI can pick the right renderer
     return {"conversation": d.get("conversation"), "uid": str(d.get("uid") or ""),
@@ -1563,6 +1566,115 @@ def _stk_cache_file(m):
     if isinstance(v, dict) and v.get("catId") is not None:
         return _stk_cache_index().get((str(v.get("catId")), str(v.get("id"))))
     return None
+
+
+_VOICE_IDX = {"t": 0, "m": {}}  # voice cache index msgId -> file; 60s TTL
+
+
+def _voice_cache_index():
+    """Zalo PC caches played voice notes on disk as
+    %APPDATA%/ZaloData/media/<account>/ZaloDownloads/voice/<msgId> (raw AAC file).
+    CDN .aac links die within days, so this cache is the only local source.
+    Index rebuilt at most every 60s."""
+    now = time.time()
+    if _VOICE_IDX["m"] and now - _VOICE_IDX["t"] < 60:
+        return _VOICE_IDX["m"]
+    idx = {}
+    for vdir in glob.glob(os.path.expandvars(
+            r"%APPDATA%/ZaloData/media/*/ZaloDownloads/voice")):
+        try:
+            for name in os.listdir(vdir):
+                if name.startswith("."):
+                    continue
+                p = os.path.join(vdir, name)
+                if os.path.isfile(p):
+                    idx[name] = p            # file named <msgId>
+                elif os.path.isdir(p):
+                    try:
+                        for f in os.listdir(p):
+                            if not f.startswith("."):
+                                idx[name] = os.path.join(p, f)
+                                break
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    _VOICE_IDX["t"], _VOICE_IDX["m"] = now, idx
+    return idx
+
+
+def _voice_urls_of(m):
+    """CDN URL of a voice message's audio (params.m4a on voice-aac-dl.zdn.vn)."""
+    raw = m.get("raw") if isinstance(m.get("raw"), dict) else None
+    v = (raw or {}).get("message")
+    if isinstance(v, dict):
+        p = v.get("params")
+        if isinstance(p, str) and p.startswith("{"):
+            try:
+                pj = json.loads(p)
+                u = pj.get("m4a")
+                if isinstance(u, str) and u.startswith("http"):
+                    return [u]
+            except Exception:
+                pass
+    return []
+
+
+def _viewer_voice(self, qs):
+    """Proxy a voice message's .aac from Zalo's CDN with Range pass-through,
+    so old voice notes stay playable (and seekable) in the browser while the
+    link lives — same idea as the sticker proxy."""
+    uid = qs.get("uid", [""])[0]
+    msgid = qs.get("msgid", [""])[0]
+    fp = _viewer_master_path(uid)
+    if not fp or not msgid:
+        self._json({"error": "not found"}, 404); return
+    try:
+        d = _viewer_load_master(fp)
+        for m in (d.get("messages") or []):
+            if str(m.get("msgType") or "") != "3" or str(m.get("msgId") or "") != msgid:
+                continue
+            # 1) Zalo PC's local voice cache (msgId-keyed, survives CDN death)
+            cf = _voice_cache_index().get(msgid)
+            if cf and os.path.isfile(cf):
+                _serve_local_file(self, cf, "audio/aac")
+                return
+            # 2) proxy the CDN while the link lives
+            for u in _voice_urls_of(m):
+                try:
+                    req = urllib.request.Request(u, headers=UA_HDRS)
+                    rng = self.headers.get("Range")
+                    if rng:
+                        req.add_header("Range", rng)
+                    upstream = urllib.request.urlopen(req, timeout=30)
+                    self.send_response(upstream.getcode() or 200)
+                    for h in ("Content-Type", "Content-Length", "Content-Range"):
+                        hv = upstream.headers.get(h)
+                        if hv:
+                            self.send_header(h, hv)
+                    self.send_header("Accept-Ranges", "bytes")
+                    self.send_header("Cache-Control", "max-age=86400")
+                    self.end_headers()
+                    while True:
+                        chunk = upstream.read(65536)
+                        if not chunk:
+                            break
+                        try:
+                            self.wfile.write(chunk)
+                        except (ConnectionAbortedError, BrokenPipeError):
+                            break
+                    return
+                except Exception:
+                    continue
+            break
+        self._json({"error": "not found"}, 404)
+    except (ConnectionAbortedError, BrokenPipeError):
+        pass
+    except Exception as e:
+        try:
+            self._json({"error": str(e)[:200]}, 500)
+        except Exception:
+            pass
 
 
 def _viewer_stickerthumb(self, qs):
@@ -1712,6 +1824,7 @@ label.chk{color:var(--dim);font-size:12.5px;display:flex;align-items:center;gap:
 .msg .s{font-weight:600;color:var(--acc);font-size:12.5px}
 .msg .x{white-space:pre-wrap;word-break:break-word}
 .stk{max-width:150px;max-height:150px;border-radius:8px;display:block;margin:2px 0}
+.vaud{height:34px;max-width:260px;display:block;margin:2px 0}
 .msg.media .x{color:var(--dim);font-style:italic}
 .msg.recalled{background:#2a1215;border-radius:8px}.msg.recalled .x{color:var(--warn);text-decoration:line-through}
 .rec{color:var(--warn);font-size:11px;margin-top:2px}
@@ -1817,6 +1930,8 @@ const jgetQ=u=>fetch(u).then(r=>r.ok?r.json():null).catch(()=>null);
 const esc=s=>(s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const TYPE_ICON={2:'🖼',3:'🎨',4:'📷',6:'📎',7:'🎨',18:'📎',19:'🔗',22:'📎',24:'🔗',28:'🎙',31:'🎬',32:'🎙',37:'🎬'};
 const stkUrl=m=>'/api/stickerthumb?uid='+encodeURIComponent(DATA.uid)+'&msgid='+encodeURIComponent(m.msgId||'');
+const vocUrl=m=>'/api/voice?uid='+encodeURIComponent(DATA.uid)+'&msgid='+encodeURIComponent(m.msgId||'');
+const vocHtml=m=>'<audio class="vaud" controls preload="none" src="'+vocUrl(m)+'"></audio>';
 function prettyText(m){
   const mt=+m.msgType||0;const raw=m.text||'';
   if(mt===2&&raw.trim().startsWith('{')){
@@ -1964,6 +2079,7 @@ function drawMsgs(){
     const stk=(mt===7||mt===4)&&m.st;
     const pt=stk?'':prettyText(m);
     const txt=stk?'':esc(zEscapeBlobs(pt));
+    const aud=(mt===3&&m.vo)?vocHtml(m):'';
     const cp=m.copies>1?` · ${m.copies} bản (gộp 2 account)`:'';
     // SIMPLE mode: only time / sender / content — no technical metadata.
     // TECHNICAL mode: full forensics (msgId, firstSeen/lastSeen, recall details).
@@ -1975,7 +2091,7 @@ function drawMsgs(){
     html+=`<div class="msg ${mt!==1?'media':''} ${m.missingSince?'recalled':''}"${tip}>
       <div class="t">${esc(tm)}</div>
       <div class="w"><div class="s">${esc(m.sender||'?')}</div>${icon&&!simple?`<div style="font-size:10.5px">${icon}</div>`:''}</div>
-      <div class="x">${stk?`<img class="stk" loading="lazy" src="${stkUrl(m)}" alt="Sticker">`:(txt||'<i>(không có nội dung)</i>')}${rec}</div></div>`;
+      <div class="x">${stk?`<img class="stk" loading="lazy" src="${stkUrl(m)}" alt="Sticker">`:(aud||txt||'<i>(không có nội dung)</i>')}${rec}</div></div>`;
   }
   const rest=msgs.length-part.length;
   if(rest>0)html+=`<button class="more" onclick="shown=${part.length};drawMsgs()">Hiện thêm ${Math.min(CHUNK,rest)} / còn ${rest}</button>`;
@@ -2044,6 +2160,8 @@ function drawZalo(){
         :'<img class="zmsgimg" loading="lazy" src="'+u+'" alt="" onclick="zLb(this.src)"><span class="zmedia-meta">📅 '+esc(m.time||'')+'</span>';
     }else if((mt===7||mt===4)&&m.st){
       inner='<img class="stk" loading="lazy" src="'+stkUrl(m)+'" alt="Sticker" onclick="zLb(this.src)">';
+    }else if(mt===3&&m.vo){
+      inner=vocHtml(m);
     }else{
       const pt=prettyText(m);
       inner=esc(zEscapeBlobs(pt))||'<i>(không có nội dung)</i>';
@@ -2159,6 +2277,16 @@ class Handler(BaseHTTPRequestHandler):
         elif p == "/api/stickerthumb":
             try:
                 _viewer_stickerthumb(self, parse_qs(urlparse(self.path).query))
+            except (ConnectionAbortedError, BrokenPipeError):
+                pass
+            except Exception as e:
+                try:
+                    self._json({"error": str(e)[:200]}, 500)
+                except Exception:
+                    pass
+        elif p == "/api/voice":
+            try:
+                _viewer_voice(self, parse_qs(urlparse(self.path).query))
             except (ConnectionAbortedError, BrokenPipeError):
                 pass
             except Exception as e:

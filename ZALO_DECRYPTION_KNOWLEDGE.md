@@ -378,3 +378,20 @@ Beyond stickers, four more payload types used to dump raw JSON into masters:
 `fold_snapshot` self-heals all of these on every fold (raw rows re-derive text via
 `_text_of`; legacy friendly rows fall back to `[Sticker]` for 4/7). Master "Mẹ Bun"
 verified: 0 JSON rows out of 108,094.
+
+## Voice notes (verified 2026-09-13)
+
+- `msgType=3` carries `params.{m4a, duration}` pointing at `voice-aac-dl.zdn.vn/<id>/<hash>.aac`.
+- **CDN links die fast**: 9/9 links probed (2021) return 404 — unlike sticker GIFs
+  (zalo-gif.zadn.vn still alive after 5 years), voice CDN expiry is photo-CDN-like.
+- **Zalo PC caches played voice notes on disk**:
+  `%APPDATA%/ZaloData/media/<accountUid>/ZaloDownloads/voice/<msgId>` — a raw
+  ADTS AAC file (no extension, "MPEG ADTS, AAC, v4 LC, 16 kHz, stereo"), one per
+  message actually played on this PC. Measured: 268 cached entries, 100/384 of the
+  "Mẹ Bun" voice notes recoverable (the other 284 were never played locally).
+- Viewer: `/api/voice?uid=&msgid=` serves local cache first, then proxies the CDN
+  with Range pass-through (seekable). Rows expose `vo:true` **only when actually
+  playable** (cache hit) so users never see a broken player; other rows keep the
+  readable `[🎙️ Tin nhắn thoại 12s]` text.
+- Playback verified in browser: readyState 4, correct duration, no MediaError;
+  works in both Messages and Zalo-style tabs (12 players rendered per chunk).
