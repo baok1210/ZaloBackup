@@ -1584,7 +1584,7 @@ label.chk{color:var(--dim);font-size:12.5px;display:flex;align-items:center;gap:
    <span id="statchip"></span>
   </div>
   <div id="mstat"></div>
-  <div id="tabs"><button id="tmsg" class="on">💬 Tin nhắn</button><button id="tmed">🖼 Media</button><button id="tzalo">💬 Dạng Zalo</button><span style="flex:1"></span><button id="tcap">📷 Chụp màn hình (PNG)</button></div>
+  <div id="tabs"><button id="tmsg" class="on">💬 Tin nhắn</button><button id="tmed">🖼 Media</button><button id="tzalo">💬 Dạng Zalo</button><span style="flex:1"></span><label class="chk" title="Chỉ hiện: thời gian · người nhắn · nội dung. Bỏ chọn để thấy thêm dữ liệu kỹ thuật (msgId, lần thấy, chi tiết thu hồi…)"><input type="checkbox" id="simple" checked> 🧾 Đơn giản</label><button id="tcap">📷 Chụp màn hình (PNG)</button></div>
   <div id="content"></div>
  </div>
 </div>
@@ -1692,6 +1692,9 @@ async function init(){
 
 $('backBtn').onclick=()=>{const uid=CUR&&CUR.uid;CUR=null;localStorage.removeItem('zlastmaster');if(uid)localStorage.removeItem('zscroll_'+uid);document.querySelectorAll('.mcard').forEach(c=>c.classList.remove('sel'));$('mstat').innerHTML='';$('statchip').innerHTML='';const cr=$('crumb');cr.textContent='Chưa chọn hội thoại';cr.classList.add('empty');cr.title='';$('content').innerHTML='<div class="empty">← Chọn một master ở danh sách bên trái để xem tin nhắn &amp; media.</div>';};
 $('crumb').onclick=()=>{if(CUR)$('backBtn').onclick();};
+// simple vs technical display toggle (persisted)
+$('simple').checked=localStorage.getItem('zsimple')!=='0';
+$('simple').addEventListener('change',()=>{try{localStorage.setItem('zsimple',$('simple').checked?'1':'0')}catch(e){}render();});
 // remember scroll position per conversation while reading
 $('content').addEventListener('scroll',()=>{if(CUR&&DATA&&!DATA.error){
   try{localStorage.setItem('zscroll_'+DATA.uid,Math.round($('content').scrollTop))}catch(e){}
@@ -1751,7 +1754,7 @@ async function load(restoreScroll){
   }
 }
 function drawMsgs(){
-  const q=$('q').value.trim().toLowerCase(),or=$('or').checked;
+  const q=$('q').value.trim().toLowerCase(),or=$('or').checked,simple=$('simple').checked;
   let msgs=DATA.messages;
   if(or)msgs=msgs.filter(m=>m.missingSince);
   if(q)msgs=msgs.filter(m=>(m.text||'').toLowerCase().includes(q)||(m.sender||'').toLowerCase().includes(q));
@@ -1763,11 +1766,17 @@ function drawMsgs(){
     const mt=+m.msgType||0,icon=TYPE_ICON[mt]||'';
     const pt=prettyText(m);
     const txt=esc(zEscapeBlobs(pt));
-    const cp=m.copies>1?`<span class="cp">· ${m.copies} bản (gộp 2 account)</span>`:'';
-    const rec=m.missingSince?`<div class="rec">⚠ Nghi bị thu hồi — lastSeen ${esc(m.lastSeen||'')}, thiếu từ ${esc(m.missingSince||'')}${cp}</div>`:cp?`<div class="cp">${cp}</div>`:'';
-    html+=`<div class="msg ${mt!==1?'media':''} ${m.missingSince?'recalled':''}" title="msgId ${esc(m.msgId||'')} · firstSeen ${esc(m.firstSeen||'')} · lastSeen ${esc(m.lastSeen||'')}">
-      <div class="t">${esc((m.time||'').slice(11))}</div>
-      <div class="w"><div class="s">${esc(m.sender||'?')}</div>${icon?`<div style="font-size:10.5px">${icon}</div>`:''}</div>
+    const cp=m.copies>1?` · ${m.copies} bản (gộp 2 account)`:'';
+    // SIMPLE mode: only time / sender / content — no technical metadata.
+    // TECHNICAL mode: full forensics (msgId, firstSeen/lastSeen, recall details).
+    const rec=simple
+      ?(m.missingSince?`<div class="rec">⚠ tin nhắn đã bị thu hồi</div>`:'')
+      :(m.missingSince?`<div class="rec">⚠ Nghi bị thu hồi — lastSeen ${esc(m.lastSeen||'')}, thiếu từ ${esc(m.missingSince||'')}${cp}</div>`:cp?`<div class="cp">${cp}</div>`:'');
+    const tip=simple?'':` title="msgId ${esc(m.msgId||'')} · cliMsgId ${esc(m.cliMsgId||'')} · firstSeen ${esc(m.firstSeen||'')} · lastSeen ${esc(m.lastSeen||'')}"`;
+    const tm=simple?(m.time||'').slice(11,16):(m.time||'').slice(11);
+    html+=`<div class="msg ${mt!==1?'media':''} ${m.missingSince?'recalled':''}"${tip}>
+      <div class="t">${esc(tm)}</div>
+      <div class="w"><div class="s">${esc(m.sender||'?')}</div>${icon&&!simple?`<div style="font-size:10.5px">${icon}</div>`:''}</div>
       <div class="x">${txt||'<i>(không có nội dung)</i>'}${rec}</div></div>`;
   }
   const rest=msgs.length-part.length;

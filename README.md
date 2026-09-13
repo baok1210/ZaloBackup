@@ -135,7 +135,8 @@ The Viewer reads the exported JSON/Media folder directly — no CDP, no Zalo run
 - Breadcrumb in the toolbar shows the current conversation (📖 name); clicking it returns to the master list.
 - Remembers your view per conversation: the active tab (Messages / Media / Zalo-style) and the scroll position are restored when you reopen it.
 - Messages: grouped by day, date-range presets + custom from/to, text search, "only recalled" filter.
-- Per-message tooltip shows msgId / firstSeen / lastSeen for forensics.
+- **🧾 Đơn giản (Simple) vs technical display** — Simple mode (default, persisted) shows only what people care about: time · sender · content. Unchecking it reveals the full forensic view: exact seconds, msgId/cliMsgId tooltips, firstSeen/lastSeen, detailed recall info.
+- Per-message tooltip shows msgId / firstSeen / lastSeen for forensics (technical mode).
 - Non-text messages are prettified (photo dims + CDN host, file/link title instead of raw JSON).
 - Media tab: inline preview of photos and **playable videos**, with the stamped send date in the caption.
 - Fully offline — reads the exports folder. Zalo does not need to be running.
