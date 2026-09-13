@@ -762,6 +762,31 @@ def run_all_job(job_id, fmt="md"):
 
 
 # ------------------------------------------------- merge duplicate exports (one click)
+def run_ig_import_job(job_id, dyi_dir):
+    """Convert an extracted Instagram "Download your information" folder into
+    master_*.json / media_master_* via ig_import. No Zalo/CDP needed."""
+    job = JOBS[job_id]
+    try:
+        import ig_import
+    except Exception as e:
+        job["status"], job["error"] = "error", "ig_import.py not found: " + str(e)
+        return
+    try:
+        job["status"], job["done"], job["total"] = "import", 0, 0
+
+        def prog(done, total, cur):
+            job["done"], job["total"], job["current"] = done, total, cur
+
+        n, names = ig_import.import_folder(dyi_dir, EXPORT_DIR, progress=prog)
+        job["status"] = "done"
+        job["count"] = n
+        job["found"] = n
+        job["filename"] = f"{n} hội thoại: {', '.join(names[:5])}" + ("…" if len(names) > 5 else "")
+        job["summary"] = [{"name": nm, "status": "ok (đã tạo master + media)"} for nm in names]
+    except Exception as e:
+        job["status"], job["error"] = "error", str(e)[:300]
+
+
 def run_merge_job(job_id):
     """Accumulate every crawl snapshot of a conversation into ONE master file
     (master_<name>_<uid>.json). Two cases per group:
@@ -979,6 +1004,16 @@ td.uid{color:var(--mut)}
   <span class="small" id="pickinfo">Chưa chọn hội thoại</span>
  </div>
  <div id="progwrap"><div class="bar"><i id="bar"></i></div><div id="msg"></div></div>
+</div>
+
+<div class="panel">
+ <div class="row"><b>📸 Import Instagram</b><span class="small">— Instagram không cho đọc trực tiếp, nhưng cho tải trọn bộ dữ liệu: mở Instagram → <b>Your activity</b> → <b>Download your information</b> → chọn <b>JSON</b>, chờ email về rồi giải nén.</span></div>
+ <div class="row" style="margin-top:10px">
+  <input id="igdir" type="search" placeholder="Dán đường dẫn thư mục đã giải nén (chứa messages\inbox…)" style="flex:1;min-width:260px">
+  <button id="goig" onclick="doIg()">Import Instagram</button>
+ </div>
+ <div id="igprog" style="display:none;margin-top:10px"><div class="bar"><i id="igbar" style="width:0%"></i></div><div id="igmsg" class="small"></div></div>
+ <div class="small">Mỗi cuộc trò chuyện sẽ thành một master (tin nhắn + ảnh/video có EXIF đúng ngày) — xem ngay trong 📖 Viewer như các master Zalo. Muốn cập nhật thì request DYI mới và import lại: chỉ phần mới được thêm vào.</div>
 </div> <div class="small">File xuất lưu tại <b>H:\zalo-backup\exports\</b> — hoặc tải trực tiếp qua link sau khi xong.<br>
 Ảnh/video đóng gói ZIP kèm ngày gửi: ảnh dán EXIF, video đặt mtime + ngày trong file mp4 — Google Photos tự nhận đúng ngày.</div>
 </div>
@@ -1106,6 +1141,25 @@ async function poll(){
   msg.innerHTML='<span class="err">✖ Lỗi: '+esc(j.error)+'</span>';
  }
 }
+async function doIg(){
+ const dir=document.getElementById('igdir').value.trim();
+ if(!dir)return alert('Dán đường dẫn thư mục DYI đã giải nén (chứa messages\\inbox).');
+ const r=await fetch('/api/igimport',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dir})});
+ const j=await r.json();
+ if(j.error){document.getElementById('igmsg').innerHTML='<span class="err">'+esc(j.error)+'</span>';document.getElementById('igprog').style.display='block';return;}
+ IGTIMER=setInterval(async()=>{
+  const p=await api('/api/progress?job='+j.job);
+  const w=document.getElementById('igbar');
+  w.style.width=(p.total?Math.round(100*p.done/p.total):(p.status==='done'?100:0))+'%';
+  let t=p.current?('⏳ '+p.current+' ('+p.done+'/'+p.total+')'):'⏳ Đang đọc thư mục…';
+  if(p.status==='done')t='<span class="ok">✔ Xong: '+esc(p.filename||'')+'</span> — mở 📖 Viewer để xem';
+  if(p.status==='error')t='<span class="err">✖ '+esc(p.error||'')+'</span>';
+  document.getElementById('igmsg').innerHTML=t;
+  if(p.status==='done'||p.status==='error')clearInterval(IGTIMER);
+ },700);
+ document.getElementById('igprog').style.display='block';
+}
+let IGTIMER=null;
 document.getElementById('expPath').textContent='…';
 fetch('/api/paths').then(r=>r.json()).then(j=>{document.getElementById('expPath').textContent=j.exports||'(không xác định)';}).catch(()=>{document.getElementById('expPath').textContent='(không xác định)';});
 loadStatus();
@@ -2388,7 +2442,8 @@ class Handler(BaseHTTPRequestHandler):
                                             "found", "okCount", "failCount",
                                             "current", "summary", "extra")}
             out["count"] = job.get("total") or job.get("done")
-            out["filename"] = os.path.basename(job["file"]) if job.get("file") else None
+            out["filename"] = job.get("filename") or \
+                (os.path.basename(job["file"]) if job.get("file") else None)
             self._json(out)
         elif p == "/api/download":
             job = JOBS.get(self.path.split("job=")[-1])
@@ -2457,6 +2512,19 @@ class Handler(BaseHTTPRequestHandler):
                          "current": None, "summary": []}
             CANCEL.clear()
             threading.Thread(target=run_all_job, args=(jid, fmt), daemon=True).start()
+            self._json({"job": jid})
+        elif p == "/api/igimport":
+            ln = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(ln) or b"{}")
+            dyi = str(body.get("dir") or "").strip().strip('"')
+            if not dyi or not os.path.isdir(dyi):
+                self._json({"error": "Thư mục không tồn tại: " + dyi}, 400); return
+            jid = f"{int(time.time()*1000):x}"
+            JOBS[jid] = {"status": "running", "uid": "*", "fmt": "igimport", "done": 0,
+                         "total": 0, "file": None, "error": None, "name": "IG IMPORT",
+                         "current": None, "summary": []}
+            CANCEL.clear()
+            threading.Thread(target=run_ig_import_job, args=(jid, dyi), daemon=True).start()
             self._json({"job": jid})
         elif p == "/api/restart":
             ok = restart_zalo_debug()
