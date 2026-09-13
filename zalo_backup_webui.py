@@ -1678,8 +1678,15 @@ async function init(){
   select(li>=0?li:0);   // reopen the conversation you were reading (default: first)
 }
 
-$('backBtn').onclick=()=>{CUR=null;localStorage.removeItem('zlastmaster');document.querySelectorAll('.mcard').forEach(c=>c.classList.remove('sel'));$('mstat').innerHTML='';$('statchip').innerHTML='';const cr=$('crumb');cr.textContent='Chưa chọn hội thoại';cr.classList.add('empty');cr.title='';$('content').innerHTML='<div class="empty">← Chọn một master ở danh sách bên trái để xem tin nhắn &amp; media.</div>';};
+$('backBtn').onclick=()=>{const uid=CUR&&CUR.uid;CUR=null;localStorage.removeItem('zlastmaster');if(uid)localStorage.removeItem('zscroll_'+uid);document.querySelectorAll('.mcard').forEach(c=>c.classList.remove('sel'));$('mstat').innerHTML='';$('statchip').innerHTML='';const cr=$('crumb');cr.textContent='Chưa chọn hội thoại';cr.classList.add('empty');cr.title='';$('content').innerHTML='<div class="empty">← Chọn một master ở danh sách bên trái để xem tin nhắn &amp; media.</div>';};
 $('crumb').onclick=()=>{if(CUR)$('backBtn').onclick();};
+// remember scroll position per conversation while reading
+$('content').addEventListener('scroll',()=>{if(CUR&&DATA&&!DATA.error){
+  try{localStorage.setItem('zscroll_'+DATA.uid,Math.round($('content').scrollTop))}catch(e){}
+}},{passive:true});
+window.addEventListener('beforeunload',()=>{if(CUR&&DATA&&!DATA.error){
+  try{localStorage.setItem('zscroll_'+DATA.uid,Math.round($('content').scrollTop))}catch(e){}
+}});
 $('menuBtn').onclick=()=>{$('side').classList.toggle('open');$('scrim').classList.toggle('show',$('side').classList.contains('open'))};
 $('scrim').onclick=()=>{$('side').classList.remove('open');$('scrim').classList.remove('show')};
 async function select(i){
@@ -1688,7 +1695,7 @@ async function select(i){
   $('side').classList.remove('open');$('scrim').classList.remove('show');
   document.querySelectorAll('.mcard').forEach((c,k)=>c.classList.toggle('sel',k===i));
   $('d1').value='';$('d2').value='';$('q').value='';$('or').checked=false;document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',c.dataset.r==='all'));
-  await load();
+  await load(true);   // opening a conversation -> restore the saved scroll position
 }
 function rangeFor(r){
   if(r==='all')return ['',''];
@@ -1696,7 +1703,7 @@ function rangeFor(r){
   if(r==='y')return [d.toISOString().slice(0,4)+'-01-01',to];
   d.setDate(d.getDate()-(+r));return [d.toISOString().slice(0,10),to];
 }
-async function load(){
+async function load(restoreScroll){
   if(!CUR)return;
   $('content').innerHTML='<div class="empty">Đang tải…</div>';
   startMstat();
@@ -1707,6 +1714,7 @@ async function load(){
   ZBLOBS={};(DATA.media&&DATA.media.files||[]).forEach((f,k)=>ZBLOBS[k]=f.file.split('/').pop());
   ME_GUESS=localStorage.getItem('zme_'+DATA.uid)||null;
   localStorage.setItem('zlastmaster',DATA.uid);   // reopen this conversation next time
+  restoreViewFor(DATA.uid);                       // reopen on the tab you left
   const senders=[...new Set(DATA.messages.map(m=>m.sender).filter(Boolean))];
   ME_OPTS=senders.map(s=>'<option value="'+esc(s)+'"'+(ME_GUESS===s?' selected':'')+'>'+esc(s)+'</option>').join('');
   if(!ME_GUESS){
@@ -1719,6 +1727,16 @@ async function load(){
   }
   $('tmed').textContent='🖼 Media'+(DATA.media?` (${DATA.media.photos+DATA.media.videos})`:'');
   shown=0;render();
+  // restore the scroll position you left this conversation at (open only, not filter changes)
+  const sv=restoreScroll?(+localStorage.getItem('zscroll_'+DATA.uid)||0):0;
+  if(sv){
+    let tries=0;const el=$('content');
+    (function restore(){
+      const mediaPending=[...document.querySelectorAll('#content img,#content video')].some(x=>!x.complete);
+      if(mediaPending&&tries<40){tries++;return setTimeout(restore,150)}
+      if(el.scrollHeight>sv)el.scrollTop=sv;
+    })();
+  }
 }
 function drawMsgs(){
   const q=$('q').value.trim().toLowerCase(),or=$('or').checked;
@@ -1774,8 +1792,15 @@ document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{
   document.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));c.classList.add('on');
   const[a,b]=rangeFor(c.dataset.r);$('d1').value=a;$('d2').value=b;load();
 });
-$('tmsg').onclick=()=>{view='msg';$('tmsg').classList.add('on');$('tmed').classList.remove('on');render()};
-$('tmed').onclick=()=>{view='med';$('tmed').classList.add('on');$('tmsg').classList.remove('on');render()};
+const ZVIEW_KEY='zview_';
+function saveViewFor(uid){if(uid)localStorage.setItem(ZVIEW_KEY+uid,view);}
+function restoreViewFor(uid){
+  const v=localStorage.getItem(ZVIEW_KEY+uid);
+  if(v==='med'){$('tmed').click();}
+  else if(v==='zalo'){$('tzalo').click();}
+}
+$('tmsg').onclick=()=>{view='msg';zmode=false;$('tmsg').classList.add('on');$('tmed').classList.remove('on');$('tzalo').classList.remove('on');saveViewFor(CUR&&CUR.uid);render()};
+$('tmed').onclick=()=>{view='med';zmode=false;$('tmed').classList.add('on');$('tmsg').classList.remove('on');$('tzalo').classList.remove('on');saveViewFor(CUR&&CUR.uid);render()};
 let zmode=false;
 function urlFor(f){return '/api/mediafile?uid='+encodeURIComponent(DATA.uid)+'&f='+encodeURIComponent(f)}
 function zEscapeBlobs(s){return s.replace(/#blob-([0-9]+)/g,(m,n)=>ZBLOBS[+n]||'')}
@@ -1820,7 +1845,7 @@ function drawZalo(){
 }
 function zLb(src){const lb=document.getElementById('zlightbox');lb.querySelector('img').src=src;lb.style.display='flex'}
 document.getElementById('zlightbox').onclick=function(){this.style.display='none'};
-$('tzalo').onclick=()=>{zmode=true;view='zalo';shown=0;$('tzalo').classList.add('on');$('tmsg').classList.remove('on');$('tmed').classList.remove('on');drawZalo()};
+$('tzalo').onclick=()=>{zmode=true;view='zalo';shown=0;$('tzalo').classList.add('on');$('tmsg').classList.remove('on');$('tmed').classList.remove('on');saveViewFor(CUR&&CUR.uid);drawZalo()};
 $('tcap').onclick=async()=>{
   try{$('tcap').textContent='⏳ Đang chụp…';
     const node=zmode?document.querySelector('.zwrap'):$('content');

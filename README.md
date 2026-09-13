@@ -129,6 +129,7 @@ The Viewer reads the exported JSON/Media folder directly — no CDP, no Zalo run
 - **← Danh sách** button returns to the master list from any view (plus a ☰ drawer on narrow windows), and a link back to the backup page.
 - Remembers the last master you opened (localStorage) and reopens it on the next visit; "← Danh sách" clears the memory.
 - Breadcrumb in the toolbar shows the current conversation (📖 name); clicking it returns to the master list.
+- Remembers your view per conversation: the active tab (Messages / Media / Zalo-style) and the scroll position are restored when you reopen it.
 - Messages: grouped by day, date-range presets + custom from/to, text search, "only recalled" filter.
 - Per-message tooltip shows msgId / firstSeen / lastSeen for forensics.
 - Non-text messages are prettified (photo dims + CDN host, file/link title instead of raw JSON).
