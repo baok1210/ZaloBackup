@@ -319,3 +319,19 @@ exports / master MD / viewer, and msgType-tagged media payloads for the correct 
 - Zalo must be logged in once interactively; afterwards the login persists and runs are
   unattended. Media already dead stays dead — the schedule's value is shrinking the future
   loss rate, not recovering the past.
+
+## Completeness of a full-conversation crawl (verified 2026-09-13)
+
+- `fetch_all` keyset pagination is **exhaustive over the retrievable set**: on the largest
+  self-chat view (uid ...4135) it walked 11 × 500-message batches in ~11 s with **zero
+  duplicate msgIds** and terminated on the short batch, reaching the conversation's very
+  first message (2023-07-02). Nothing more exists server-side for the API to return.
+- `countTotalMessageOfConversation` is **unreliable as a completeness oracle**: it reported
+  5,423 for a conversation where the exhaustive walk yields 5,397 (likely counting recalled
+  messages), and **0** for another conversation with 6,452 messages (that conv belongs to the
+  other account's view — a limitation, not a bug: you can only crawl conversations visible to
+  the logged-in account; log in the other account and fold via master merge).
+- Practical completeness model: every message the logged-in account can retrieve is captured;
+  messages recalled *before* the first crawl are unrecoverable by any tool; messages recalled
+  *after* a crawl stay in the master with `missingSince`; the daily schedule minimizes the
+  recalled-before-first-crawl window and downloads media links while alive.
