@@ -854,7 +854,7 @@ def restart_zalo_debug():
 
 
 # ---------------------------------------------------------------- HTTP server
-HTML = """<!doctype html><html lang="vi"><head><meta charset="utf-8">
+HTML = r"""<!doctype html><html lang="vi"><head><meta charset="utf-8">
 <title>Zalo Backup</title><style>
 :root{--bg:#0f1420;--panel:#1a2233;--line:#2a3550;--tx:#e8ecf5;--mut:#8fa0bf;--acc:#4da3ff;--ok:#3ddc84;--err:#ff6b6b}
 *{box-sizing:border-box}body{margin:0;font:14px/1.5 system-ui,Segoe UI,Arial;background:var(--bg);color:var(--tx)}
@@ -890,6 +890,17 @@ a.dl{color:var(--ok);font-weight:600}
  </div>
 </div>
 
+<div class="panel" id="helpPanel">
+ <div class="row"><b>🚀 Bắt đầu ở đây — 4 bước</b></div>
+ <ol style="margin:8px 0 4px 18px;padding:0;font-size:13.5px;line-height:2">
+  <li id="step1">Zalo PC đang đăng nhập account muốn backup → bấm <b>⟳ Restart Zalo (debug mode)</b> ở trên (chỉ cần 1 lần mỗi lần mở máy).</li>
+  <li id="step2">Chọn hội thoại trong bảng dưới → bấm <b>⬇ Xuất hội thoại đã chọn</b> — hoặc bấm luôn <b>⚡ Backup TẤT CẢ hội thoại</b> để lấy hết.</li>
+  <li id="step3">Bấm <b>🖼 Tải tất cả ảnh &amp; video</b> khi còn chọn hội thoại (bỏ qua cái đã tải 24h qua).</li>
+  <li id="step4">Mở <a href="/viewer" style="color:#38bdf8;font-weight:600">📖 Xem &amp; đọc master</a> → bấm <b>🔗 Gộp bản trùng lặp</b> ở bước 2 nếu muốn gộp 2 account. Xem thoải mái, hẹn giờ backup tự động cũng được.</li>
+ </ol>
+ <div class="small">💾 File lưu tại <b id="expPath"></b> · 🕦 Muốn tự động backup mỗi sáng? Đọc <b>HƯỚNG-DẪN-SỬ-DỤNG.md</b> nằm cạnh phần mềm.</div>
+</div>
+
 <div class="panel">
  <div class="row"><input id="q" type="search" placeholder="Tìm theo tên hoặc UID…">
  <span class="small" id="cnt"></span></div>
@@ -899,7 +910,7 @@ a.dl{color:var(--ok);font-weight:600}
 </div>
 
 <div class="panel">
- <div class="row fmt"><b>Định dạng:</b>
+ <div class="row fmt"><b>Định dạng:</b> <span class="small">(không rõ thì giữ JSON — đọc được ngay trong Viewer)</span>
   <label><input type="radio" name="fmt" value="json" checked> JSON (dễ đọc)</label>
   <label><input type="radio" name="fmt" value="txt"> TXT (chat)</label>
   <label><input type="radio" name="fmt" value="csv"> CSV (Excel)</label>
@@ -915,9 +926,7 @@ a.dl{color:var(--ok);font-weight:600}
   <span class="small" id="pickinfo">Chưa chọn hội thoại</span>
  </div>
  <div id="progwrap"><div class="bar"><i id="bar"></i></div><div id="msg"></div></div>
-</div>
-
-<div class="small">File xuất lưu tại <b>H:\\zalo-backup\\exports\\</b> — hoặc tải trực tiếp qua link sau khi xong.<br>
+</div> <div class="small">File xuất lưu tại <b>H:\zalo-backup\exports\</b> — hoặc tải trực tiếp qua link sau khi xong.<br>
 Ảnh/video đóng gói ZIP kèm ngày gửi: ảnh dán EXIF, video đặt mtime + ngày trong file mp4 — Google Photos tự nhận đúng ngày.</div>
 </div>
 <script>
@@ -927,9 +936,10 @@ async function api(p){const r=await fetch(p);return r.json();}
 async function loadStatus(){
  const el=document.getElementById('acct');
  try{const s=await api('/api/status');
-  if(!s.cdp){el.innerHTML='⚠ Zalo chưa chạy debug mode — bấm <b>Restart Zalo</b>';return;}
-  el.innerHTML='Zalo OK — account: <b>'+(s.name||'?')+'</b> ('+(s.uid||'?')+') — '+s.convCount+' hội thoại';
- }catch(e){el.textContent='⚠ Không kết nối được server';}
+  if(!s.cdp){el.innerHTML='⚠ Zalo chưa chạy debug mode — bấm <b>Restart Zalo</b>';setTimeout(loadStatus,10000);return;}
+  el.innerHTML='✅ Zalo OK — account: <b>'+(s.name||'?')+'</b> ('+(s.uid||'?')+') — '+s.convCount+' hội thoại';
+  loadConvs();
+ }catch(e){el.textContent='⚠ Không kết nối được server';setTimeout(loadStatus,10000);}
 }
 async function loadConvs(){
  try{const s=await api('/api/conversations');CONVS=s.convs||[];
@@ -1029,7 +1039,7 @@ async function poll(){
    const okN=j.summary.filter(s=>s.status.startsWith('ok')).length;
    const skipN=j.summary.filter(s=>s.status.startsWith('skip')).length;
    const failN=j.summary.filter(s=>s.status.startsWith('fail')).length;
-   msg.innerHTML='<span class="ok">✔ Xong TẤT CẢ: '+j.total+' hội thoại — '+okN+' ok, '+skipN+' bỏ qua (đã có), '+failN+' lỗi</span>. File nằm trong H:\\zalo-backup\\exports\\';
+   msg.innerHTML='<span class="ok">✔ Xong TẤT CẢ: '+j.total+' hội thoại — '+okN+' ok, '+skipN+' bỏ qua (đã có), '+failN+' lỗi</span>. File nằm trong thư mục exports cạnh phần mềm';
   } else {
    msg.innerHTML='<span class="ok">✔ Xong</span> — <a class="dl" href="/api/download?job='+JOB.job+'">Tải file '+esc(j.filename)+'</a>';
   }
@@ -1038,7 +1048,9 @@ async function poll(){
   msg.innerHTML='<span class="err">✖ Lỗi: '+esc(j.error)+'</span>';
  }
 }
-loadStatus();loadConvs();
+document.getElementById('expPath').textContent='…';
+fetch('/api/paths').then(r=>r.json()).then(j=>{document.getElementById('expPath').textContent=j.exports||'(không xác định)';}).catch(()=>{document.getElementById('expPath').textContent='(không xác định)';});
+loadStatus();
 </script></body></html>"""
 
 
@@ -1880,6 +1892,8 @@ class Handler(BaseHTTPRequestHandler):
         p = self.path.split("?")[0]
         if p == "/" or p == "/index.html":
             self._send(200, HTML.encode("utf-8"), "text/html; charset=utf-8")
+        elif p == "/api/paths":
+            self._json({"exports": EXPORT_DIR, "root": BACKUP_DIR})
         elif p == "/api/status":
             try:
                 ok = cdp_ready()

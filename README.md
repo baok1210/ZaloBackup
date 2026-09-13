@@ -26,6 +26,10 @@ offline — no Zalo server, no cloud, no plaintext credentials ever leave your m
 
 ## Quickstart
 
+**Non-technical?** Read **[HƯỚNG-DẪN-SỬ-DỤNG.md](HƯỚNG-DẪN-SỬ-DỤNG.md)** — a complete Vietnamese
+step-by-step guide (install, daily backup, viewer, auto-schedule, FAQ). The app itself also shows
+a "🚀 Bắt đầu ở đây — 4 bước" checklist on its main page.
+
 **Prerequisites**
 - Zalo PC installed and logged into the account whose conversations you want to back up.
   (The tool reads Zalo's own local store; it only has access to what that Zalo session holds.)
