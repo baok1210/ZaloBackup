@@ -520,3 +520,30 @@ Kiến trúc đã build (`ig_import.py`, được WebUI gọi qua `/api/igimport
 
 Hạn chế biết trước: DYI chỉ chứa media chưa bị Meta dọn (geoblocked/pruned file bỏ qua);
 không có recall flags (IG không export trạng thái xóa); аудio chỉ là file .aac trong ZIP.
+
+## Project 2: Instagram DM Backup — live CDP crawl (2026-09-13, H:\instagram-backup)
+
+Tách thành project RIÊNG (repo InstagramBackup), cùng pipeline master/merge/viewer với Zalo:
+
+- **Kênh dữ liệu:** không có store cục bộ; crawl QUA phiên web đã đăng nhập bằng CDP port
+  **9222** (Chrome/Edge tự mở bằng `launch_chrome_debug`, profile giữ session nằm cạnh app).
+- **API thật đã verify trên trang (2026-09-13, Chrome 152):**
+  * `https://i.instagram.com/api/v1/direct_v2/inbox/?limit=N` → **HTTP 400 dù đã đăng nhập web**
+    (i.instagram.com đòi UA app mobile + token riêng — KHÔNG dùng được từ tab web).
+  * `https://www.instagram.com/api/v1/direct_v2/inbox/?limit=50` + header `x-ig-app-id:
+    936619743392454` + `credentials:'include'` → **200 OK** (khi chưa đăng nhập vẫn 200 nhưng
+    body là HTML login — phải kiểm tra `text.startsWith('{')` để phát hiện).
+  * `direct_v2/threads/<id>/?cursor=<oldest_cursor>&limit=50` → items; hết kho khi
+    `thread.prev_cursor === "MINDCURSOR"`; `timestamp` tính bằng **microseconds** (chia 1000).
+  * viewer_id = `thread.viewer_id` của trang đầu; user map từ `thread.users[]`.
+- **Item types đã map** → msgType Zalo: text→1, like→1 (❤️), media(mt1)→2, media(mt2)→18,
+  voice_media→3 (.aac URL), animated_media→7 (GIF), link→6, media_share→2/18, reel_share/clip→2,
+  action_log→6, placeholder→1 "[Không hiển thị được]", còn lại (reaction, raven…) → bỏ.
+- **Media:** URL CDN kèm trong item sống ~24h-1tuần; tải ngay qua UA trình duyệt + Referer
+  instagram.com (không cần cookie); EXIF/mtime theo giờ gửi như hệ Zalo.
+- **Chia sẻ code với ZaloBackup:** `ig_merge.py` = bản sao `zalo_merge.py` (đổi tên);
+  `ig_import.py` (DYI) import `ig_merge`; webui copy + vá: find_page chọn tab instagram.com,
+  JS block thay bằng fetch direct_v2, fetch_all dùng cursor + mapper `_ig_item_to_zalo`,
+  `_media_url_chain` đọc `_ig_url`, port 8330, khối DYI import giữ nguyên.
+- Lưu ý webui viewer tab "Dạng Zalo" và mọi nhãn khác vẫn nói "Zalo" ở vài chuỗi ít xuất hiện
+  (không gây nhầm lẫn chức năng).
