@@ -127,6 +127,17 @@ The Viewer reads the exported JSON/Media folder directly — no CDP, no Zalo run
 - Media tab: inline preview of photos and **playable videos**, with the stamped send date in the caption.
 - Fully offline — reads the exports folder. Zalo does not need to be running.
 
+### Zalo-style chat mode + screenshot export
+- Tab **💬 Dạng Zalo** re-renders the conversation like the real Zalo chat window: green "me" bubbles
+  on the right, white bubbles with avatar initial on the left, day separators (Hôm nay / Hôm qua / dd/mm/yyyy),
+  a blue header bar with the conversation name and a "who is me" selector (remembered per master).
+- Photos that were saved into the media master are shown **inline inside the bubble** (mapped by send
+  time, ±2 s tolerance, album-safe); click to zoom. Dead-CDN photos fall back to a readable caption.
+- Tab **📷 Chụp màn hình (PNG)** renders the current view (Zalo style included) into a single PNG via
+  the bundled html2canvas 1.4.1 (vendored, MIT) — works fully offline; the download carries the
+  conversation name and timestamp in the filename. Ctrl+P / print gives a clean white PDF of the chat.
+- Recalled messages keep the red strikethrough treatment in Zalo mode.
+
 ### Account model awareness
 - The tool understands that Zalo gives each account a *different* msgId for the same message,
   and that a self-chat exists twice (once from each side), each with its own UID.

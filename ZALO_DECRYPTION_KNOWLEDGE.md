@@ -277,5 +277,16 @@ click **Restart Zalo (debug mode)** in the WebUI (or the taskkill/start command 
   the viewer reads exports directly — Zalo/CDP does NOT need to be running.
 - Non-text msgTypes are prettified: photos → dims + CDN host, files/links → 📎/🔗 +
   title; tooltip always carries msgId/firstSeen/lastSeen for forensics.
+- **Zalo-style mode (tab "Dạng Zalo")**: renders bubbles like the real Zalo window —
+  me=green right / others=white left with avatar initial, day pills (Hôm nay/Hôm qua/dd/mm/yyyy),
+  blue header bar + "who is me" `<select>` persisted in localStorage per master uid
+  (auto-pick: 2 senders → first, >2 → the non-"Tôi" sender). Photo msgs of msgType 2 are
+  matched to media-master `photos/` by send time ±2 s (bisect + whole-window scan so
+  multi-photo albums all match; globally once each) and displayed inline, click-to-zoom
+  lightbox. Dead-CDN photos keep the readable caption fallback.
+- **Screenshot export (📷 button)**: bundles html2canvas 1.4.1 (MIT, vendored into the
+  VIEWER_HTML string — no CDN, works offline) and renders the active view to a PNG
+  download; print CSS yields a clean PDF. `ZALO_NO_BROWSER=1` env suppresses the
+  auto-open-browser behavior of `main()` (used when starting the exe from scripts).
 
-— Last updated 2026-09-11, after media export + friendly JSON + master viewer + exe rebuild.
+— Last updated 2026-09-13, after Zalo-style chat mode + offline PNG screenshot export.
