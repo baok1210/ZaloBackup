@@ -2044,7 +2044,7 @@ async function load(restoreScroll){
   if(DATA.error){$('content').innerHTML='<div class="empty">'+esc(DATA.error)+'</div>';return}
   zmode=false;$('tzalo').classList.remove('on');$('tmsg').classList.add('on');$('tmed').classList.remove('on');view='msg';
   ZBLOBS={};(DATA.media&&DATA.media.files||[]).forEach((f,k)=>ZBLOBS[k]=f.file.split('/').pop());
-  ME_GUESS=localStorage.getItem('zme_'+DATA.uid)||null;
+  ME_GUESS=localStorage.getItem('zme2_'+DATA.uid)||null;   // v2: old wrong guesses discarded
   localStorage.setItem('zlastmaster',DATA.uid);   // reopen this conversation next time
   restoreViewFor(DATA.uid);                       // reopen on the tab you left
   const senders=[...new Set(DATA.messages.map(m=>m.sender).filter(Boolean))];
@@ -2058,7 +2058,7 @@ async function load(restoreScroll){
     else if(nonToi.length&&nonToi.length<senders.length)ME_GUESS=nonToi[0];
     else if(senders.length===2)ME_GUESS=senders[0];
     else if(senders.length)ME_GUESS=senders[0];
-    if(ME_GUESS)try{localStorage.setItem('zme_'+DATA.uid,ME_GUESS)}catch(e){}
+    if(ME_GUESS)try{localStorage.setItem('zme2_'+DATA.uid,ME_GUESS)}catch(e){}
   }
   if(ME_GUESS===CUR.conversation&&!senders.includes(ME_GUESS)){
     ME_GUESS=senders.find(s=>s!==CUR.conversation)||ME_GUESS;
@@ -2187,7 +2187,7 @@ function drawZalo(){
   if(zmode&&part.length){
     document.querySelector('.zbar .zback').onclick=()=>{$('tzalo').classList.remove('on');view='msg';$('tmsg').classList.add('on');render()};
     const sel=document.getElementById('zme');
-    if(sel){sel.onchange=()=>{ME_GUESS=sel.value;try{localStorage.setItem('zme_'+DATA.uid,ME_GUESS)}catch(e){}shown=0;drawZalo()};
+    if(sel){sel.onchange=()=>{ME_GUESS=sel.value;try{localStorage.setItem('zme2_'+DATA.uid,ME_GUESS)}catch(e){}shown=0;drawZalo()};
       if(ME_GUESS)sel.value=ME_GUESS;}
   }
   $('statchip').textContent=part.length.toLocaleString('vi-VN')+'/'+msgs.length.toLocaleString('vi-VN')+' tin đang hiện · tổng '+DATA.total.toLocaleString('vi-VN');

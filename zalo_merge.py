@@ -620,6 +620,21 @@ def fold_snapshot(master, rows, crawled_at=None, complete=True):
     msgs.sort(key=lambda m: m["_ts"])
     master["snapshots"].append({"crawledAt": crawled_at, "count": len(rows),
                                 "new": n_new, "missingMarked": n_miss})
+    # Record which account performed this crawl: in a raw row of THIS snapshot,
+    # fromUid=0 marks the crawler's own messages. Adds to me_uids (deduped).
+    me_uid = None
+    for r in rows:
+        raw = r.get("raw") or {}
+        if str(raw.get("fromUid") or "") == "0":
+            for cand in (str(raw.get("toUid") or ""),):
+                if cand:
+                    me_uid = cand
+                    break
+            break
+    if me_uid:
+        lst = master.setdefault("me_uids", [])
+        if me_uid not in lst:
+            lst.append(me_uid)
     master["updatedAt"] = _now_str()
     master["count"] = len(msgs)
     return n_new, n_upd, n_miss
@@ -669,6 +684,13 @@ def _backfill_senders(master):
             fixed += 1
 
     # --- alias merge: one canonical label per fromUid -----------------------
+    # "Me" uid detection (no user input needed): the master's own uid IS the
+    # crawler account (self-chats and 1-1 chats crawled as that account), and
+    # snapshots record extra crawler accounts in me_uids. fromUid=0 means the
+    # account that was logged in when that snapshot was taken.
+    muid = str(master.get("uid") or "")
+    me_uids = {muid} | {str(u) for u in (master.get("me_uids") or [])}
+    canonical = {}
     counts = {}          # uid -> {sender: n}
     for m in msgs:
         raw = m.get("raw") or {}
@@ -684,6 +706,15 @@ def _backfill_senders(master):
         # prefer the real display name; 'Tôi' only wins if it is the ONLY name
         best = sorted(cc.items(), key=lambda kv: (kv[0].lower() == "tôi", -kv[1]))
         canonical[fu] = best[0][0]
+    # "Tôi" is never a real identity: merge it into the OTHER name of the same
+    # uid (the real display name that account had when logged in as itself).
+    # This only triggers on single-crawler masters; multi-crawler masters keep
+    # per-name labels since '0' covers several accounts there.
+    for fu in list(canonical):
+        cc = counts.get(fu) or {}
+        if "Tôi" in {k.lower() for k in cc} and len([k for k in cc if k.lower() != "tôi"]) == 1:
+            real = [k for k in cc if k.lower() != "tôi"][0]
+            canonical[fu] = real
     if not canonical:
         return fixed
     fixed2 = 0

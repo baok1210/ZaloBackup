@@ -424,3 +424,16 @@ labels to exactly 2 senders: Đoàn Bảo (60,346) + Mẹ Bun (47,748).
 Viewer ME-guess upgrade: if exactly one sender is NOT named like any master
 conversation, that side is "me" (own name equals the self-chat conversation name
 in masters merged across both accounts).
+
+## Auto-detecting "me" — no manual override needed (2026-09-13)
+
+Root cause of wrong bubble sides was never missing knowledge: raw rows carry
+fromUid, and fromUid=0 literally means "the logged-in account of the export".
+Two fixes make the pipeline self-identifying:
+1. `fold_snapshot` records the crawling account into `master.me_uids` (from a
+   fromUid=0 row's toUid) so multi-crawler masters keep provenance.
+2. `_backfill_senders` merges "Tôi" into the same uid's other name (real
+   display name wins). Masters now always show one label per real person.
+Viewer: ME-guess prefers the sender not named like any master conversation;
+guess key bumped to `zme2_<uid>` so stale wrong guesses are discarded once.
+Verified: Mẹ Bun auto-guess = Đoàn Bảo, 215 own bubbles, persisted.
