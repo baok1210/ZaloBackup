@@ -582,3 +582,15 @@ Instagram hiện captcha lặp vô hạn khi đăng nhập trong Chrome có
    Edge. Use the inbox-JSON probe instead of cookie sniffing.
 6. `i.instagram.com` is blocked from web tabs; always use `www.instagram.com/api/v1/...` with
    header `x-ig-app-id: 936619743392454`.
+
+## Instagram login — QR page was WRONG, cookie-paste is the reliable path (2026-09-13)
+
+- `instagram.com/qr` is the profile SHARE code, not a login method. Instagram web has NO QR
+  login (unlike WhatsApp Web). Do not route users there.
+- Reliable bypass for the login captcha: **paste cookies**. Take `sessionid`, `ds_user_id`,
+  `csrftoken` (+ `ig_did`, `mid`, `datr`) from a personal browser already logged in
+  (F12 → Application → Cookies), then inject via CDP `Network.setCookie` into the debug
+  browser (domain `.instagram.com`, path `/`, secure + httpOnly for sessionid, sameSite=None
+  for auth cookies). Verify with the inbox-JSON probe. Implemented as `/api/cookies`.
+- Login form on a fresh profile can still loop captcha even without debug flags (fresh device
+  fingerprint + hardened 2026 models). Cookie-paste sidesteps the form entirely.
