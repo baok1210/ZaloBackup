@@ -305,3 +305,17 @@ exports / master MD / viewer, and msgType-tagged media payloads for the correct 
   guessed from age.
 - One link per message is probed (the first of oriUrl/normalUrl/hdUrl/thumbUrl/hd); messages
   already saved locally are never probed. Cache survives server restarts.
+
+## Daily auto-crawl (Task Scheduler)
+
+- Chain: Task `ZaloBackup AutoCrawl` (07:30 daily, StartWhenAvailable catch-up, 8 h limit,
+  IgnoreNew) → `run_auto_crawl.vbs` (windowless) → `ZaloAutoCrawl.exe` → HTTP on `127.0.0.1:8320`:
+  ensure server (starts `ZaloBackup.exe` with `ZALO_NO_BROWSER=1` if down), ensure CDP
+  (`/api/restart` if `/api/status` says `cdp:false`), then `/api/exportall` + `/api/merge`,
+  polling `/api/progress?job=` every 5 s. Exit code feeds Task Scheduler's Last Result.
+- Gotcha encoded in the runner: the **first** `/api/status` after a server boot can take ~6 s
+  (cold CDP walk), so the runner probes `GET /` for liveness (cheap, no CDP) and uses a 15 s
+  timeout for the CDP status check. Logs: `logs/auto_crawl.log`.
+- Zalo must be logged in once interactively; afterwards the login persists and runs are
+  unattended. Media already dead stays dead — the schedule's value is shrinking the future
+  loss rate, not recovering the past.

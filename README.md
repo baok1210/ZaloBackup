@@ -148,6 +148,26 @@ The Viewer reads the exported JSON/Media folder directly — no CDP, no Zalo run
   updates live while the audit runs. Zalo PC does not need to be open — the probe goes straight to
   the CDN URLs stored in the master.
 
+### Daily auto-crawl (Windows Task Scheduler)
+
+One-time setup (PowerShell, in the project folder):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File register_task.ps1   # daily 07:30
+```
+
+Every morning the machine runs `ZaloAutoCrawl.exe` (invisible, via `run_auto_crawl.vbs`), which:
+
+1. Starts the WebUI server if it is not running (no browser window opens).
+2. Restarts Zalo PC in debug mode if CDP is down (login persists, no interaction needed).
+3. Runs **Backup ALL** (text + media, skipping what was exported in the last 24 h) and then
+   **Merge** (fold snapshots into the masters).
+
+Results append to `logs/auto_crawl.log`; Task Scheduler shows the last-run result.
+Catch-up: if the PC was off at 07:30, the run happens as soon as it boots. Overlapping runs are
+skipped, never doubled. Remove the schedule any time with
+`powershell -ExecutionPolicy Bypass -File unregister_task.ps1`.
+
 ### Account model awareness
 - The tool understands that Zalo gives each account a *different* msgId for the same message,
   and that a self-chat exists twice (once from each side), each with its own UID.
