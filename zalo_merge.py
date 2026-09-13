@@ -539,8 +539,41 @@ def master_path_for(out_dir, name, uid):
     return os.path.join(out_dir, f"{MASTER_PREFIX}{safe}_{uid}.json")
 
 
+def _backfill_senders(master):
+    """Fill sender on master rows exported from RAW store dumps (Zalo's raw rows
+    often carry no dName, so the viewer showed '?'). Evidence used, in order:
+    the row's own dName, then a fromUid->name map built from rows that DO have
+    dName, then the master's own account name for fromUid=0 rows. Ambiguous
+    uids (several different names) are skipped. Runs on every save."""
+    msgs = master.get("messages") or []
+    name_map, ambiguous = {}, set()
+    for m in msgs:
+        raw = m.get("raw") or {}
+        fu, dn = str(raw.get("fromUid") or ""), str(raw.get("dName") or "")
+        if fu and dn:
+            if name_map.get(fu, dn) != dn:
+                ambiguous.add(fu)
+            name_map[fu] = dn
+    for fu in ambiguous:
+        name_map.pop(fu, None)
+    muid = str(master.get("uid") or "")
+    fixed = 0
+    for m in msgs:
+        if str(m.get("sender") or "").strip():
+            continue
+        raw = m.get("raw") or {}
+        fu = str(raw.get("fromUid") or "")
+        name = str(raw.get("dName") or "") or name_map.get(fu) \
+            or (name_map.get(muid) if fu in ("0", muid) and muid in name_map else "")
+        if name:
+            m["sender"] = name
+            fixed += 1
+    return fixed
+
+
 def save_master(master, out_dir):
     """Write master_<name>_<uid>.json + .md. Returns [paths]."""
+    _backfill_senders(master)
     path = master_path_for(out_dir, master["conversation"], master.get("uid") or "x")
     with open(path, "wb") as f:
         f.write(json.dumps(master, ensure_ascii=False, indent=1).encode("utf-8"))
