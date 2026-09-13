@@ -289,4 +289,6 @@ click **Restart Zalo (debug mode)** in the WebUI (or the taskkill/start command 
   download; print CSS yields a clean PDF. `ZALO_NO_BROWSER=1` env suppresses the
   auto-open-browser behavior of `main()` (used when starting the exe from scripts).
 
-— Last updated 2026-09-13, after Zalo-style chat mode + offline PNG screenshot export.
+— Last updated 2026-09-13, after Zalo-style chat mode + offline PNG screenshot export + video
+inline rendering (`msgType 18`), pretty media one-liners (`zalo_merge.pretty_media_text`) shared by
+exports / master MD / viewer, and msgType-tagged media payloads for the correct renderer per file.

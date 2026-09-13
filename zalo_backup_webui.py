@@ -502,10 +502,13 @@ def _friendly(m, peer_name=""):
         return v
     if not isinstance(v, dict):
         return ""
-    if t == "2":
-        return "[Ảnh] " + (v.get("oriUrl") or v.get("normalUrl") or "")
-    if t == "18":
-        return "[Video] " + (v.get("oriUrl") or "")
+    if t in ("2", "18"):
+        try:
+            pm = json.loads(v.get("params") or "{}")
+            return ZMERGE.pretty_media_text(t, params=pm)
+        except Exception:
+            pass
+        return ("[Ảnh] " if t == "2" else "[Video] ") + (v.get("oriUrl") or v.get("normalUrl") or "")
     if t == "19":
         return "[File] " + str(v.get("title") or "") + " " + str(v.get("href") or "")
     if t == "6":
@@ -1065,6 +1068,7 @@ def _viewer_media_info(uid, with_files=False):
                 sa = v.get("sentAt")
                 files.append({"file": rel, "bytes": v.get("bytes") or 0,
                               "sentAt": "%04d-%02d-%02d %02d:%02d:%02d" % tuple(sa) if sa else None,
+                              "msgType": "18" if rel.startswith("videos/") else ("2" if rel.startswith("photos/") else None),
                               "alsoAs": len(v.get("alsoAs") or [])})
     except Exception:
         for sub, isv in (("photos", False), ("videos", True)):
@@ -1140,15 +1144,21 @@ def _viewer_api_master(uid, d1, d2):
         return {"error": "master not found for uid " + str(uid)}
     d = _viewer_load_master(fp)
     msgs = d.get("messages") or []
-    # map photo send-times -> media-master files (for inline display in Zalo mode)
-    photo_list = []  # (epoch_seconds, rel)
+    # map photo/video send-times -> media-master files (for inline display in Zalo mode)
+    photo_list = []  # (epoch_seconds, rel, msgType)
     md = _viewer_media_dir_for(uid)
     if md:
         try:
             idx = json.load(open(os.path.join(md, "index.json"), encoding="utf-8"))
             for v in (idx.get("files") or {}).values():
                 rel = v.get("file") or ""
-                if not rel.startswith("photos/"):
+                if rel.startswith("photos/"):
+                    mt = "2"
+                elif rel.startswith("videos/"):
+                    mt = "18"
+                else:
+                    mt = None
+                if not mt:
                     continue
                 sa = v.get("sentAt")
                 if not sa:
@@ -1156,7 +1166,7 @@ def _viewer_api_master(uid, d1, d2):
                 try:
                     import calendar
                     ep = calendar.timegm(tuple(sa[:6]) + (0, 0, -1))
-                    photo_list.append((ep, rel))
+                    photo_list.append((ep, rel, mt))
                 except Exception:
                     continue
             photo_list.sort()
@@ -1168,7 +1178,7 @@ def _viewer_api_master(uid, d1, d2):
     eps = [p[0] for p in photo_list]
     for m in msgs:
         rel = None
-        if str(m.get("msgType") or "") == "2":
+        if str(m.get("msgType") or "") in ("2", "18"):
             t = m.get("time") or ""
             try:
                 import calendar
@@ -1185,7 +1195,7 @@ def _viewer_api_master(uid, d1, d2):
                     cands.append(photo_list[j]); j += 1
                 cands.sort(key=lambda p: abs(p[0] - ep))
                 for c in cands:
-                    if c[1] not in used:
+                    if c[1] not in used and c[2] == str(m.get("msgType") or ""):
                         rel = c[1]
                         used.add(rel)
                         break
@@ -1193,7 +1203,7 @@ def _viewer_api_master(uid, d1, d2):
                 rel = None
         assign.append(rel)
     keys = ("time", "sender", "msgType", "text", "msgId", "firstSeen",
-            "lastSeen", "missingSince", "copies", "sources")
+            "lastSeen", "missingSince", "copies", "sources")  # noqa: E501
     out = []
     for m, rel in zip(msgs, assign):
         t = m.get("time") or ""
@@ -1205,6 +1215,7 @@ def _viewer_api_master(uid, d1, d2):
         if rel:
             rec["f"] = rel
         out.append(rec)
+    # NOTE: media payload gets msgType per file so the UI can pick the right renderer
     return {"conversation": d.get("conversation"), "uid": str(d.get("uid") or ""),
             "masterFile": os.path.basename(fp), "total": len(msgs), "count": len(out),
             "messages": out, "media": _viewer_media_info(uid, with_files=True)}
@@ -1337,6 +1348,7 @@ label.chk{color:var(--dim);font-size:12.5px;display:flex;align-items:center;gap:
 .zbubble.zrecalled{background:#fdecea;color:#b3261e;text-decoration:line-through}
 .zbubble .zrec{display:block;color:#d93025;font-size:10.5px;text-decoration:none}
 .zmsgimg{display:block;max-width:320px;max-height:320px;border-radius:8px;cursor:zoom-in}
+.zmsgvid{display:block;max-width:320px;max-height:320px;border-radius:8px;background:#000}
 #zlightbox{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;z-index:99;cursor:zoom-out}
 #zlightbox img{max-width:94vw;max-height:94vh}
 .zempty{color:var(--dim);text-align:center;padding:60px 20px}
@@ -1391,6 +1403,14 @@ function prettyText(m){
   if(mt===2&&raw.trim().startsWith('{')){
     try{const j=JSON.parse(raw);const p=JSON.parse(j.params||'{}');
       return '🖼 Ảnh '+(p.width||'?')+'×'+(p.height||'?')+' — link CDN đã hết hạn';}catch(e){}
+  }
+  if(mt===18&&raw.trim().startsWith('{')){
+    try{const j=JSON.parse(raw);const p=JSON.parse(j.params||'{}');
+      const dur=+p.duration||0;const ds=dur?Math.round(dur/1000)+'s':'';
+      const sz=+p.fileSize?fmtB(+p.fileSize):'';
+      const dim=(p.video_original_width&&p.video_original_height)?p.video_original_width+'×'+p.video_original_height:'';
+      const grp=(+p.total_item_in_group>1)?' (album '+(+p.id_in_group+1)+'/'+p.total_item_in_group+')':'';
+      return '🎬 Video'+(ds?' '+ds:'')+(sz?' · '+sz:'')+(dim?' · '+dim:'')+grp+' — link CDN đã hết hạn';}catch(e){}
   }
   if(raw.trim().startsWith('{')){
     try{const j=JSON.parse(raw);const t=j.title||j.mediaTitle||'';const h=j.href||'';const act=j.action||'';
@@ -1483,8 +1503,13 @@ function drawMedia(){
   if(!md||!(md.files||[]).length){$('content').innerHTML='<div class="empty">Chưa có media master cho hội thoại này.<br>Chạy "Tải tất cả ảnh &amp; video" rồi "Gộp bản trùng lặp".</div>';return}
   let html=`<div class="dayhdr" style="margin-top:14px">${md.photos} ảnh · ${md.videos} video · ${fmtB(md.bytes)} — mới nhất trước</div><div id="grid">`;
   for(const f of md.files){
+    const mt=f.msgType||0;
     const u=`/api/mediafile?uid=${encodeURIComponent(DATA.uid)}&f=${encodeURIComponent(f.file)}`;
-    const inner=f.file.endsWith('.mp4')
+    const inner=(mt===18&&m.f)
+      ?`<video class="zmsgvid" controls preload="metadata" src="${urlFor(m.f)}"></video>`
+      :(mt===2&&m.f)
+      ?`<img class="zmsgimg" loading="lazy" src="${urlFor(m.f)}" alt="" onclick="zLb('${urlFor(m.f)}')">`
+      :f.file.endsWith('.mp4')
       ?`<video controls preload="metadata" src="${u}"></video>`
       :`<img loading="lazy" src="${u}" alt="">`;
     html+=`<div class="cell">${inner}<div class="cap"><b>📅 ${esc(f.sentAt||'?')}</b> · ${fmtB(f.bytes)}${f.alsoAs?` · ${f.alsoAs} tên khác`:''}<br>${esc(f.file.split('/').pop())}</div></div>`;
@@ -1520,9 +1545,11 @@ function drawZalo(){
     const me=ME_GUESS&&m.sender===ME_GUESS;
     const mt=+m.msgType||0;
     let av='';if(!me)av='<div class="zav">'+esc((m.sender||'?').trim().charAt(0).toUpperCase())+'</div>';
-    let inner='';
-    if(mt===2&&m.f){
-      inner='<img class="zmsgimg" loading="lazy" src="'+urlFor(m.f)+'" alt="" onclick="zLb(this.src)"><span class="zmedia-meta">📅 '+esc(m.time||'')+'</span>';
+    let inner='';    if((mt===2||mt===18)&&m.f){
+      const u=urlFor(m.f);
+      inner=mt===18
+        ?'<video class="zmsgvid" controls preload="metadata" src="'+u+'"></video><span class="zmedia-meta">📅 '+esc(m.time||'')+'</span>'
+        :'<img class="zmsgimg" loading="lazy" src="'+u+'" alt="" onclick="zLb(this.src)"><span class="zmedia-meta">📅 '+esc(m.time||'')+'</span>';
     }else{
       const pt=prettyText(m);
       inner=esc(zEscapeBlobs(pt))||'<i>(không có nội dung)</i>';

@@ -137,6 +137,10 @@ The Viewer reads the exported JSON/Media folder directly — no CDP, no Zalo run
   the bundled html2canvas 1.4.1 (vendored, MIT) — works fully offline; the download carries the
   conversation name and timestamp in the filename. Ctrl+P / print gives a clean white PDF of the chat.
 - Recalled messages keep the red strikethrough treatment in Zalo mode.
+- **Videos play inline** in Zalo mode and the media grid (mp4 from the media master, HTTP Range
+  streaming); messages whose CDN link has expired render as a readable one-liner instead of raw
+  JSON: `[Video 2s · 417 KB (album 10/12)]`, `[Ảnh 896×2030]`. Photo/video payloads are prettified
+  the same way in master `.md` files, friendly JSON/CSV/TXT exports, and the viewer.
 
 ### Account model awareness
 - The tool understands that Zalo gives each account a *different* msgId for the same message,

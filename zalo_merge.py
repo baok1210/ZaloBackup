@@ -168,6 +168,50 @@ def merge_sources(list_of_rows, progress=None):
     return out
 
 
+def pretty_media_text(mt, txt=None, params=None):
+    """Human-readable one-liner for photo/video JSON payloads.
+    Accepts either the raw JSON text (txt) or an already-parsed params dict."""
+    t = str(mt or "")
+    if params is None:
+        if not txt or not str(txt).lstrip().startswith("{"):
+            return txt
+        try:
+            j = json.loads(txt)
+            if not isinstance(j, dict):
+                return txt
+            params = json.loads(j.get("params") or "{}")
+            if not isinstance(params, dict):
+                params = {}
+        except Exception:
+            return txt
+    p = params or {}
+    if t == "2":
+        w, h = p.get("width"), p.get("height")
+        dim = f" {w}×{h}" if w and h else ""
+        return f"[Ảnh{dim}]"
+    if t == "18":
+        try:
+            dur = int(p.get("duration") or 0)
+        except Exception:
+            dur = 0
+        ds = f" {dur // 1000}s" if dur else ""
+        try:
+            fs = int(p.get("fileSize") or 0)
+            sz = (f" · {fs / 1048576:.1f} MB" if fs >= 1048576
+                  else (f" · {fs / 1024:.0f} KB" if fs else ""))
+        except Exception:
+            sz = ""
+        grp = ""
+        try:
+            tot = int(p.get("total_item_in_group") or 0)
+            if tot > 1:
+                grp = f" (album {int(p.get('id_in_group') or 0) + 1}/{tot})"
+        except Exception:
+            pass
+        return f"[Video{ds}{sz}{grp}]"
+    return txt
+
+
 def _friendly_row(r, peer_name=""):
     ts = r["ts"]
     try:
@@ -175,10 +219,8 @@ def _friendly_row(r, peer_name=""):
     except Exception:
         t = ""
     txt = r["text"]
-    if r["type"] == "2" and txt.startswith("{"):
-        txt = "[Ảnh] " + txt[:120]
-    elif r["type"] == "18" and txt.startswith("{"):
-        txt = "[Video] " + txt[:120]
+    if r["type"] in ("2", "18"):
+        txt = pretty_media_text(r["type"], txt)
     return {"time": t, "sender": r["sender"] or ("Tôi" if r["raw"] and
             str(r["raw"].get("fromUid")) == "0" else peer_name or "?"),
             "msgType": r["type"], "text": txt,
@@ -418,8 +460,11 @@ def build_master_md_folded(master):
             cur = day
             buf.write(f"\n## {day[8:10]}/{day[5:7]}/{day[:4]}\n\n")
         flag = " ⚠️_đã_bị_xóa" if m.get("missingSince") else ""
+        txt = m["text"] or ""
+        if str(m.get("msgType")) in ("2", "18"):
+            txt = pretty_media_text(m.get("msgType"), txt)
         buf.write(f"**{(m['time'] or '')[11:]} — {m['sender'] or '?'}**: "
-                  f"{(m['text'] or '').replace(chr(10), '  ')}{flag}  \n")
+                  f"{txt.replace(chr(10), '  ')}{flag}  \n")
     return buf.getvalue().encode("utf-8")
 
 
