@@ -452,3 +452,15 @@ First run caught 5,382 leftover JSON rows in the Bảo/Blue Roses masters (legac
 photo/video/URL payloads that predate the self-heal rules) — healed via
 pretty_media_text; all masters now pass.
 Run: `npm run smoke` (server must be running on :8320).
+
+## sendBubbleMessage — không phải link, là bong bóng cuộc gọi (13/09/2026)
+
+Zalo đặt `message.title = "sendBubbleMessage"` (kèm `action = recommened.misscall/calltime`)
+cho **bong bóng log cuộc gọi** — exporter friendly cũ dán nhầm `[Link] sendBubbleMessage`.
+Bằng chứng: quét mọi raw export, 100% raw row có title này mang action cuộc gọi; 176 link
+thật đều mang title = tiêu đề trang web. Đã sửa 3 lớp:
+1. `pretty_media_text` (zalo_merge) + `_friendly` (webui): title sentinel → `[📞 Cuộc gọi thoại]` / `[📹 Cuộc gọi video]`.
+2. `heal_master_texts()` — hàm heal tách riêng, chạy tự động trước mỗi lần fold; raw rows heal theo action thật.
+3. Legacy friendly rows (raw=null): chỉ đổi khi title nhận diện được (`sendBubbleMessage`),
+   KHÔNG đụng `[Link]` trống hoặc `[Link] https://…` (link thật).
+Healed: master_Blue Roses 6/6 dòng; smoke test PASS toàn bộ.

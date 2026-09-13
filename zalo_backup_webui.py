@@ -548,7 +548,11 @@ def _friendly(m, peer_name=""):
     if t == "19":
         return "[File] " + str(v.get("title") or "") + " " + str(v.get("href") or "")
     if t == "6":
-        return "[Link] " + str(v.get("title") or v.get("href") or "")
+        ttl = str(v.get("title") or "")
+        if ttl == "sendBubbleMessage":   # Zalo's internal title for CALL bubbles
+            return "[📹 Cuộc gọi video]" if str((v.get("params") or "")).find("calltype\":\"1") >= 0 \
+                else "[📞 Cuộc gọi thoại]"
+        return "[Link] " + (ttl or str(v.get("href") or ""))
     if t == "7":
         return "[Sticker]"
     return _msg_text(m)

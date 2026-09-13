@@ -277,8 +277,13 @@ def pretty_media_text(mt, txt=None, params=None, payload=None):
         if act == "recommened.user":
             who = str(pl2.get("title") or "").strip() or "Danh thiếp"
             return f"[👤 {who}]"
-        # recommened.link and anything else: [Link] <title>
+        # recommened.link and anything else: [Link] <title>;
+        # Zalo uses the sentinel title "sendBubbleMessage" for CALL bubbles
+        # (raw rows with that title always carry a call action) — never a URL.
         ttl = str(pl2.get("title") or "").strip()
+        if ttl == "sendBubbleMessage":
+            return "[📹 Cuộc gọi video]" if str(p.get("calltype")) == "1" \
+                else "[📞 Cuộc gọi thoại]"
         return f"[Link] {ttl}" if ttl else (txt or "[Link]")
     if t == "2":
         w, h = p.get("width"), p.get("height")
@@ -513,6 +518,46 @@ def file_crawled_at(path):
     return datetime.fromtimestamp(os.path.getmtime(path)).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def heal_master_texts(master):
+    """Self-heal legacy master rows in place (runs before every fold, and can
+    be called on saved masters directly):
+      * legacy JSON-dump payloads -> readable text (voice/doodle/location/
+        sticker/webcontent);
+      * type-6 baked "[Link] <title>" from the pre-fix friendly exporter ->
+        real kind. sendBubbleMessage is Zalo's internal title for CALL bubbles
+        (raw evidence: every raw row with that title carries a recommened.*
+        call action; genuine links always carry the page title), so a baked
+        "[Link] sendBubbleMessage" is a mislabeled call row. Title sentinels:
+        bare "[Link]" and empty titles mean the row never had text — we only
+        rewrite rows whose title is an identifiable Zalo internal name.
+    Returns number of rows rewritten."""
+    n = 0
+    for m in master.get("messages") or []:
+        t = str(m.get("msgType"))
+        raw = m.get("raw") if isinstance(m.get("raw"), dict) else None
+        txt0 = str(m.get("text") or "")
+        if t == "6" and txt0.startswith("[Link] "):
+            if isinstance(raw, dict):
+                act = str((raw.get("message") or {}).get("action") or "") \
+                    if isinstance(raw.get("message"), dict) else ""
+                if act in ("recommened.calltime", "recommened.misscall", "recommened.user"):
+                    m["text"] = _text_of(raw)   # call logs / contact cards, not links
+                    n += 1
+                continue
+            title = txt0[7:].strip()          # legacy baked label, raw=None
+            if title == "sendBubbleMessage":
+                m["text"] = "[📞 Cuộc gọi thoại]"
+                n += 1
+            continue
+        if t in ("1", "3", "4", "5", "7", "17", "52") and txt0.lstrip().startswith("{"):
+            if raw is not None:
+                m["text"] = _text_of(raw)   # voice/doodle/location/sticker/webcontent
+            else:
+                m["text"] = "[Sticker]"          # legacy friendly row: stickers only
+            n += 1
+    return n
+
+
 def fold_snapshot(master, rows, crawled_at=None, complete=True):
     """Fold one crawl snapshot into the master. rows = load_source() output.
     Matching: msgId exact hit first (new exports carry msgId); otherwise fuzzy —
@@ -525,21 +570,7 @@ def fold_snapshot(master, rows, crawled_at=None, complete=True):
     crawled_at = crawled_at or _now_str()
     msgs = master.setdefault("messages", [])
     _heal_device_copies(msgs)                 # collapse pre-fix duplicates
-    for m in msgs:                            # self-heal legacy JSON-dump payloads
-        t = str(m.get("msgType"))
-        raw = m.get("raw") if isinstance(m.get("raw"), dict) else None
-        txt0 = str(m.get("text") or "")
-        if t == "6" and txt0.startswith("[Link] ") and isinstance(raw, dict):
-            act = str((raw.get("message") or {}).get("action") or "") \
-                if isinstance(raw.get("message"), dict) else ""
-            if act in ("recommened.calltime", "recommened.misscall", "recommened.user"):
-                m["text"] = _text_of(raw)    # call logs / contact cards, not links
-            continue
-        if t in ("1", "3", "4", "5", "7", "17", "52") and txt0.lstrip().startswith("{"):
-            if raw is not None:
-                m["text"] = _text_of(raw)   # voice/doodle/location/sticker/webcontent
-            else:
-                m["text"] = "[Sticker]"          # legacy friendly row: stickers only
+    heal_master_texts(master)                 # self-heal legacy JSON/labels
     by_id = {m["msgId"]: m for m in msgs if m.get("msgId")}
     by_cli = {m["cliMsgId"]: m for m in msgs if m.get("cliMsgId")}
     # per-type ts-sorted index over ALL master rows (any row can fuzzy-match a
