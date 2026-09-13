@@ -634,8 +634,16 @@ def _backfill_senders(master):
     """Fill sender on master rows exported from RAW store dumps (Zalo's raw rows
     often carry no dName, so the viewer showed '?'). Evidence used, in order:
     the row's own dName, then a fromUid->name map built from rows that DO have
-    dName, then the master's own account name for fromUid=0 rows. Ambiguous
-    uids (several different names) are skipped. Runs on every save."""
+    dName, then the master's own account name for fromUid=0 rows. Runs on every
+    save.
+
+    Aliases: multi-account merges give the SAME fromUid several display names
+    (e.g. 'Tôi' from account A's export vs 'Đoàn Bảo' from account B's export),
+    and the peer appears under the name each account had in its contact list
+    ('Mẹ Bun' vs 'Hồng Thắm'). One canonical name per uid is picked (most
+    frequent dName; 'Tôi' never wins) and ALL rows of that uid are relabeled,
+    so the viewer sees exactly one sender per real person and side-guessing
+    (chat bubbles) stays correct."""
     msgs = master.get("messages") or []
     name_map, ambiguous = {}, set()
     for m in msgs:
@@ -659,7 +667,34 @@ def _backfill_senders(master):
         if name:
             m["sender"] = name
             fixed += 1
-    return fixed
+
+    # --- alias merge: one canonical label per fromUid -----------------------
+    counts = {}          # uid -> {sender: n}
+    for m in msgs:
+        raw = m.get("raw") or {}
+        fu = str(raw.get("fromUid") or "")
+        s = str(m.get("sender") or "").strip()
+        if fu and s:
+            counts.setdefault(fu, {})
+            counts[fu][s] = counts[fu].get(s, 0) + 1
+    canonical = {}
+    for fu, cc in counts.items():
+        if len(cc) < 2:
+            continue
+        # prefer the real display name; 'Tôi' only wins if it is the ONLY name
+        best = sorted(cc.items(), key=lambda kv: (kv[0].lower() == "tôi", -kv[1]))
+        canonical[fu] = best[0][0]
+    if not canonical:
+        return fixed
+    fixed2 = 0
+    for m in msgs:
+        raw = m.get("raw") or {}
+        fu = str(raw.get("fromUid") or "")
+        want = canonical.get(fu)
+        if want and str(m.get("sender") or "") != want:
+            m["sender"] = want
+            fixed2 += 1
+    return fixed + fixed2
 
 
 def save_master(master, out_dir):

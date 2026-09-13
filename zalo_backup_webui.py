@@ -2052,10 +2052,16 @@ async function load(restoreScroll){
   if(!ME_GUESS){
     const low=senders.map(s=>s.toLowerCase());
     const nonToi=senders.filter((s,i)=>low[i]!=='tôi'&&low[i]!=='toi');
-    if(senders.length===2)ME_GUESS=senders[0];
+    const peerSet=new Set(MASTERS.map(x=>x.conversation));
+    const nonPeer=senders.filter(s=>!peerSet.has(s));
+    if(nonPeer.length===1)ME_GUESS=nonPeer[0];           // the side NOT named like a conversation
     else if(nonToi.length&&nonToi.length<senders.length)ME_GUESS=nonToi[0];
+    else if(senders.length===2)ME_GUESS=senders[0];
     else if(senders.length)ME_GUESS=senders[0];
     if(ME_GUESS)try{localStorage.setItem('zme_'+DATA.uid,ME_GUESS)}catch(e){}
+  }
+  if(ME_GUESS===CUR.conversation&&!senders.includes(ME_GUESS)){
+    ME_GUESS=senders.find(s=>s!==CUR.conversation)||ME_GUESS;
   }
   $('tmed').textContent='🖼 Media'+(DATA.media?` (${DATA.media.photos+DATA.media.videos})`:'');
   shown=0;render();

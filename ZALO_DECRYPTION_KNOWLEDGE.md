@@ -409,3 +409,18 @@ split by `message.action`:
 Also: many legacy call rows carried `title="sendBubbleMessage"` or `href=""`.
 Self-heal rewrites `[Link] …` rows on every fold via raw payload. Exports
 (JSON/TXT/CSV `_friendly`) share the same rendering through `pretty_media_text`.
+
+## Sender alias merge — one person, several names (2026-09-13)
+
+Multi-account merges gave one fromUid several display names: account A's export
+labels itself "Tôi" while account B's export shows the same uid as "Đoàn Bảo";
+the peer appears as "Mẹ Bun" (46,386 rows) AND "Hồng Thắm" (1,362) because each
+account had a different contact name. With 4 "senders" for 2 real people the
+viewer's bubble side-guessing broke (own messages rendered on the peer side).
+Fix in `_backfill_senders` (runs on every master save): count (fromUid → sender)
+pairs, and when a uid has several names pick the canonical one (most frequent;
+"Tôi" never wins) and relabel ALL of that uid's rows. Mẹ Bun master went from 4
+labels to exactly 2 senders: Đoàn Bảo (60,346) + Mẹ Bun (47,748).
+Viewer ME-guess upgrade: if exactly one sender is NOT named like any master
+conversation, that side is "me" (own name equals the self-chat conversation name
+in masters merged across both accounts).
