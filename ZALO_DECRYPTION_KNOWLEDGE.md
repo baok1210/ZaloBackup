@@ -493,3 +493,30 @@ Các quyết định thiết kế cần GIỮ khi sửa UI về sau:
 
 Tham khảo đầy đủ quy trình audit: mục "Design Audit" trong SKILL.md của taste-skill
 (font/palette/layout/states/content/icons/code-quality).
+
+## Instagram import qua DYI (2026-09-13, commit 2252a72)
+
+Instagram KHÔNG có store cục bộ để crawl như Zalo PC, nhưng Meta cung cấp export chính thức
+**Download Your Information (DYI)**: Instagram → Your activity → Download your information
+→ định dạng JSON → nhận link tải qua email (sau 2026-05-08 DM Instagram không còn E2EE,
+nội dung trong DYI là plaintext đầy đủ).
+
+Format DYI đã verify:
+- `messages/inbox/<Tên>_<threadid>/message_1.json … message_N.json` (chia file ~ tuần tự)
+- Mọi chuỗi bị **double-encoding** (UTF-8 đọc nhầm Latin-1) → sửa bằng
+  `s.encode("latin-1").decode("utf-8")`, fail thì giữ nguyên (`fix_ig`).
+- Trường dùng được: `sender_name, timestamp_ms, content[], photos[].uri, videos[].uri,
+  audio_files, gifs, shares[].link, call_duration` — media KHÔNG có URL mạng, chỉ có `uri`
+  trỏ tới file ảnh/video nằm trong cùng bộ ZIP.
+
+Kiến trúc đã build (`ig_import.py`, được WebUI gọi qua `/api/igimport`):
+1. Mỗi folder trong inbox → 1 master qua **chính `fold_snapshot`** của Zalo: mỗi tin được cấp
+   `msgId` tổng hợp = sha1(`uid|ts|sender|type|text`) → re-import DYI mới hơn tự fold đúng bằng
+   id, không đụng fuzzy matcher, không bao giờ dup.
+2. Ảnh/video copy sang `media_master_<name>_<uid>/photos|videos` (SHA-1 dedup + `alsoAs`),
+   tên file = giờ gửi, JPEG gắn EXIF DateTimeOriginal, video đặt mtime → Google Photos tự nhận ngày.
+3. Viewer KHÔNG cần sửa gì: master + media master đúng shape Zalo → tự hiện trong danh sách,
+   tự match ảnh vào bong bóng qua `_viewer_media_map`.
+
+Hạn chế biết trước: DYI chỉ chứa media chưa bị Meta dọn (geoblocked/pruned file bỏ qua);
+không có recall flags (IG không export trạng thái xóa); аудio chỉ là file .aac trong ZIP.
