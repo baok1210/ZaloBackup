@@ -559,3 +559,26 @@ Instagram hiện captcha lặp vô hạn khi đăng nhập trong Chrome có
    session cookies persist trong profile.
 3. Đóng cửa sổ → bấm "Mở Chrome (debug mode)": CDP 9222 bật lên với session sẵn có,
    crawl không cần đăng nhập lại. Không bao giờ đăng nhập trong cửa sổ debug.
+
+## Instagram login captcha — root cause chain (2026-09-13)
+
+1. **Debug-port login = infinite captcha.** Instagram blocks login inside any browser with
+   `--remote-debugging-port` (automation flag). Fix: login mode opens a NORMAL window on the
+   same profile; afterwards the debug launch reuses the persisted session.
+2. **Chrome/Edge 136+ refuses CDP on the default user-data-dir** (anti-infostealer change).
+   Attaching to "your real browser" is impossible now; `RemoteDebuggingAllowed` policy does NOT
+   re-enable it for the default dir. Only a custom `--user-data-dir` binds the port.
+3. **v20 app-bound cookies are path-bound.** Since ~2024 Chrome/Edge encrypt cookies with an
+   app-bound key (wrapped by the OS elevation service). The key decrypts only for a browser
+   running from the ORIGINAL user-data-dir path. A cloned profile at a different path loads
+   but cannot decrypt v20 cookies — sites see an anonymous jar. Cloning `Local State` + profile
+   does NOT help (tested end-to-end on Edge with a fresh sessionid).
+   → Clone is still valuable: `ig_did`/`datr`/device fingerprint survive, so the tool profile
+   looks like a KNOWN device for the one-time login (much lower checkpoint risk).
+4. **Authoritative logged-in probe:** `GET /api/v1/direct_v2/inbox/?limit=1` returns JSON only
+   when authenticated; anonymous requests get the HTML shell WITH HTTP 200 — never trust the
+   status code alone, check `txt.startsWith('{')` and `j.inbox`.
+5. `document.cookie` cannot see `sessionid` (HttpOnly); `ds_user_id` also invisible in modern
+   Edge. Use the inbox-JSON probe instead of cookie sniffing.
+6. `i.instagram.com` is blocked from web tabs; always use `www.instagram.com/api/v1/...` with
+   header `x-ig-app-id: 936619743392454`.
