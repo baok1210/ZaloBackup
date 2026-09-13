@@ -1669,10 +1669,12 @@ async function init(){
     <div>${m.recalled?`<span class="badge warn">⚠ ${m.recalled} nghi thu hồi</span>`:''}
     <span class="badge acc">💬 master</span>${md?`<span class="badge">🖼 ${md.photos+md.videos} file · ${fmtB(md.bytes)}</span>`:''}</div></div>`}).join('');
   document.querySelectorAll('.mcard').forEach(c=>c.onclick=()=>select(+c.dataset.i));
-  select(0);
+  const lastUid=localStorage.getItem('zlastmaster');
+  const li=MASTERS.findIndex(m=>m.uid===lastUid);
+  select(li>=0?li:0);   // reopen the conversation you were reading (default: first)
 }
 
-$('backBtn').onclick=()=>{CUR=null;document.querySelectorAll('.mcard').forEach(c=>c.classList.remove('sel'));$('mstat').innerHTML='';$('statchip').innerHTML='';$('content').innerHTML='<div class="empty">← Chọn một master ở danh sách bên trái để xem tin nhắn &amp; media.</div>';};
+$('backBtn').onclick=()=>{CUR=null;localStorage.removeItem('zlastmaster');document.querySelectorAll('.mcard').forEach(c=>c.classList.remove('sel'));$('mstat').innerHTML='';$('statchip').innerHTML='';$('content').innerHTML='<div class="empty">← Chọn một master ở danh sách bên trái để xem tin nhắn &amp; media.</div>';};
 $('menuBtn').onclick=()=>{$('side').classList.toggle('open');$('scrim').classList.toggle('show',$('side').classList.contains('open'))};
 $('scrim').onclick=()=>{$('side').classList.remove('open');$('scrim').classList.remove('show')};
 async function select(i){
@@ -1698,6 +1700,7 @@ async function load(){
   zmode=false;$('tzalo').classList.remove('on');$('tmsg').classList.add('on');$('tmed').classList.remove('on');view='msg';
   ZBLOBS={};(DATA.media&&DATA.media.files||[]).forEach((f,k)=>ZBLOBS[k]=f.file.split('/').pop());
   ME_GUESS=localStorage.getItem('zme_'+DATA.uid)||null;
+  localStorage.setItem('zlastmaster',DATA.uid);   // reopen this conversation next time
   const senders=[...new Set(DATA.messages.map(m=>m.sender).filter(Boolean))];
   ME_OPTS=senders.map(s=>'<option value="'+esc(s)+'"'+(ME_GUESS===s?' selected':'')+'>'+esc(s)+'</option>').join('');
   if(!ME_GUESS){
